@@ -25,6 +25,35 @@ const cells = new Map(); // "ГГГГ-ММ-ДД" -> кнопка
 
 const $ = (id) => document.getElementById(id);
 
+// ---------- пропуск на запись ----------
+
+// Логин и пароль сервер сверяет со значениями из .env. Здесь держим готовое
+// значение заголовка X-Auth, чтобы не спрашивать пароль на каждое действие.
+const AUTH_KEY = "kafa-auth";
+let authHeader = "";
+
+try {
+  authHeader = localStorage.getItem(AUTH_KEY) || "";
+} catch {
+  // приватное окно или запрет на хранилище — просто спросим пароль заново
+}
+
+function rememberAuth(value) {
+  authHeader = value;
+  try {
+    if (value) localStorage.setItem(AUTH_KEY, value);
+    else localStorage.removeItem(AUTH_KEY);
+  } catch {
+    // не сохранилось — пропуск проживёт до перезагрузки страницы
+  }
+  renderAuth();
+}
+
+// В заголовки нельзя класть кириллицу как есть — кодируем обе половины
+function pack(user, pass) {
+  return `${encodeURIComponent(user)}:${encodeURIComponent(pass)}`;
+}
+
 // Имена для выпадающего списка: сначала ростер из public/names.js,
 // затем те, кого отмечали раньше, но в ростере уже нет.
 function knownPeople() {
@@ -54,11 +83,25 @@ function requiredNames() {
 // ---------- сеть ----------
 
 async function api(method, url, body) {
+  const headers = {};
+  if (body) headers["Content-Type"] = "application/json";
+  if (authHeader) headers["X-Auth"] = authHeader;
+
   const res = await fetch(url, {
     method,
-    headers: body ? { "Content-Type": "application/json" } : undefined,
+    headers: Object.keys(headers).length ? headers : undefined,
     body: body ? JSON.stringify(body) : undefined,
   });
+
+  if (res.status === 401) {
+    rememberAuth("");
+    openAuth();
+    setPickNote("Нужен пароль, чтобы менять историю");
+    const err = new Error("нет пропуска");
+    err.handled = true; // сообщение уже показано рядом с кнопкой
+    throw err;
+  }
+
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `Сервер ответил ${res.status}`);
   return data;
@@ -83,7 +126,9 @@ async function run(fn) {
     state = await fn();
     showNote("");
   } catch (err) {
-    showNote(err.message === "Failed to fetch" ? "Нет связи с сервером. Проверьте, что он запущен." : err.message);
+    // handled — про ошибку уже сказано в карточке дня, верхний баннер не нужен
+    if (err.handled) showNote("");
+    else showNote(err.message === "Failed to fetch" ? "Нет связи с сервером. Проверьте, что он запущен." : err.message);
   }
   render();
 }
@@ -284,6 +329,67 @@ function render() {
   renderSummary();
 }
 
+// ---------- вход ----------
+
+function renderAuth() {
+  const inside = Boolean(authHeader);
+  const formOpen = !$("auth-form").hidden;
+  $("auth-in").hidden = !inside;
+  $("auth-open").hidden = inside || formOpen;
+}
+
+function openAuth() {
+  $("auth-form").hidden = false;
+  $("auth-open").hidden = true;
+  ($("auth-user").value ? $("auth-pass") : $("auth-user")).focus();
+}
+
+function closeAuth() {
+  $("auth-form").hidden = true;
+  $("auth-pass").value = "";
+  renderAuth();
+}
+
+$("auth-open").addEventListener("click", openAuth);
+$("auth-cancel").addEventListener("click", closeAuth);
+$("auth-out").addEventListener("click", () => {
+  rememberAuth("");
+  setPickNote("");
+});
+
+$("auth-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const user = $("auth-user").value.trim();
+  const pass = $("auth-pass").value;
+  if (!user || !pass) return;
+
+  const candidate = pack(user, pass);
+  const btn = $("auth-form").querySelector("button[type=submit]");
+  btn.disabled = true;
+  try {
+    const res = await fetch("/api/auth/check", {
+      method: "POST",
+      headers: { "X-Auth": candidate },
+    });
+    if (res.status === 401) {
+      setPickNote("Логин или пароль не подошли");
+      $("auth-pass").select();
+      return;
+    }
+    if (!res.ok) {
+      setPickNote(`Проверка не прошла: сервер ответил ${res.status}`);
+      return;
+    }
+    rememberAuth(candidate);
+    closeAuth();
+    setPickNote("");
+  } catch {
+    setPickNote("Нет связи с сервером");
+  } finally {
+    btn.disabled = false;
+  }
+});
+
 // ---------- действия ----------
 
 function addPicked() {
@@ -322,6 +428,7 @@ $("jump-today").addEventListener("click", () => {
 // ---------- старт ----------
 
 buildGrid();
+renderAuth();
 run(() => api("GET", "/api/log"));
 
 // подтягиваем чужие отметки, пока страница открыта

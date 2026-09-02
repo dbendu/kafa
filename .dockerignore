@@ -9,3 +9,5 @@ Dockerfile
 docker-compose.yml
 Caddyfile
 .env
+Caddyfile.example
+.env.example

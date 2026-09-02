@@ -15,6 +15,9 @@
 
 * { box-sizing: border-box; }
 
+/* Любой display в правилах ниже перебил бы атрибут hidden — держим его сильнее. */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   background: var(--paper);
@@ -149,6 +152,23 @@ body {
   border: 0; border-radius: 8px; cursor: pointer;
 }
 .primary:disabled { opacity: .5; cursor: default; }
+
+/* вход */
+.auth { margin-top: 10px; font-size: 13px; color: var(--muted); }
+.auth form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.auth input {
+  min-width: 0; flex: 0 1 200px;
+  padding: 8px 10px; font-size: 14px;
+  border: 1px solid #ded8cf; border-radius: 8px;
+  background: #fbfaf8; color: inherit;
+}
+.auth input:focus { outline: 2px solid var(--l3); outline-offset: -1px; }
+.primary.tiny { padding: 8px 14px; font-size: 14px; }
+.linky {
+  background: none; border: 0; padding: 0;
+  color: var(--l3); font-size: 13px; cursor: pointer;
+  text-decoration: underline;
+}
 
 /* топ */
 .bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }

@@ -45,6 +45,17 @@
       <button id="add" class="primary">Отметить</button>
     </div>
     <p id="pick-note" class="pick-note" role="status" hidden></p>
+
+    <div class="auth">
+      <button id="auth-open" class="linky" hidden>Войти, чтобы отмечать</button>
+      <form id="auth-form" hidden>
+        <input id="auth-user" type="text" placeholder="Логин" autocomplete="username">
+        <input id="auth-pass" type="password" placeholder="Пароль" autocomplete="current-password">
+        <button type="submit" class="primary tiny">Войти</button>
+        <button type="button" id="auth-cancel" class="linky">Отмена</button>
+      </form>
+      <span id="auth-in" hidden>Вход выполнен · <button id="auth-out" class="linky">выйти</button></span>
+    </div>
   </section>
 
   <section class="card" id="top-card" hidden>

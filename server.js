@@ -11,6 +11,12 @@ const MAX_BODY = 8 * 1024;
 const MAX_NAME = 40;
 const MAX_BATCH = 50; // сколько имён принимаем за один запрос
 
+// Логин и пароль берём из окружения (см. .env). Если не заданы — проверки нет
+// и правит кто угодно. Сравнение обычной строкой: это домашний счётчик кофе.
+const AUTH_USER = process.env.AUTH_USER || "";
+const AUTH_PASS = process.env.AUTH_PASS || "";
+const authOn = Boolean(AUTH_USER && AUTH_PASS);
+
 // ---------- хранилище ----------
 
 let state = { days: {}, people: [] };
@@ -64,6 +70,23 @@ function cleanName(raw) {
 }
 
 const sameName = (a, b) => a.toLocaleLowerCase("ru") === b.toLocaleLowerCase("ru");
+
+// Заголовок X-Auth: "логин:пароль", обе половины в encodeURIComponent —
+// в заголовки нельзя класть кириллицу как есть.
+function allowed(req) {
+  if (!authOn) return true;
+  const raw = req.headers["x-auth"];
+  if (typeof raw !== "string") return false;
+  const i = raw.indexOf(":");
+  if (i < 0) return false;
+  try {
+    const user = decodeURIComponent(raw.slice(0, i));
+    const pass = decodeURIComponent(raw.slice(i + 1));
+    return user === AUTH_USER && pass === AUTH_PASS;
+  } catch {
+    return false; // кривое кодирование — считаем, что не подошло
+  }
+}
 
 // ---------- операции ----------
 
@@ -160,6 +183,16 @@ async function serveStatic(res, urlPath) {
 async function handleApi(req, res, url) {
   const seg = url.pathname.split("/").filter(Boolean); // ["api", ...]
 
+  // всё, кроме чтения, требует пароля
+  if (req.method !== "GET" && !allowed(req)) {
+    return sendJson(res, 401, { error: "Нужен пароль, чтобы менять историю" });
+  }
+
+  // POST /api/auth/check — форма входа проверяет пароль, ничего не меняя
+  if (req.method === "POST" && seg.length === 3 && seg[1] === "auth" && seg[2] === "check") {
+    return sendJson(res, 200, { ok: true });
+  }
+
   // GET /api/log
   if (req.method === "GET" && seg.length === 2 && seg[1] === "log") {
     return sendJson(res, 200, state);
@@ -254,6 +287,9 @@ load()
     server.listen(PORT, () => {
       console.log(`Кофейный календарь: http://localhost:${PORT}`);
       console.log(`Данные: ${DATA_FILE}`);
+      console.log(authOn
+        ? `Правки под паролем, логин: ${AUTH_USER}`
+        : "AUTH_USER/AUTH_PASS не заданы — править может кто угодно");
     });
   })
   .catch((err) => {
