@@ -1,0 +1,42 @@
+services:
+  coffee:
+    build: .
+    image: coffee-calendar
+    container_name: coffee-calendar
+    # tini как PID 1: корректно пробрасывает SIGTERM и подбирает зомби-процессы
+    init: true
+    restart: unless-stopped
+    # Наружу порт не выставляем: приложение видно только Caddy по внутренней сети.
+    # Для отладки напрямую: docker compose exec coffee wget -qO- localhost:3000/api/log
+    expose:
+      - "3000"
+    volumes:
+      - coffee-data:/data
+      # Список имён правится на сервере без пересборки: поправили файл — F5 в браузере.
+      # Если разворачиваете не из репозитория, уберите эту строку, иначе Docker
+      # создаст на месте отсутствующего файла пустую папку.
+      - ./public/names.js:/app/public/names.js:ro
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: coffee-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp" # HTTP/3
+    environment:
+      DOMAIN: ${DOMAIN:?задайте DOMAIN в файле .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Здесь лежат сертификаты. Без этого тома каждый пересозданный контейнер
+      # заново просит сертификат и упирается в лимиты Let's Encrypt.
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - coffee
+
+volumes:
+  coffee-data:
+  caddy-data:
+  caddy-config:

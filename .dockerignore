@@ -1,0 +1,11 @@
+.git
+.gitignore
+node_modules
+data.json
+data.json.tmp
+*.md
+Dockerfile
+.dockerignore
+docker-compose.yml
+Caddyfile
+.env

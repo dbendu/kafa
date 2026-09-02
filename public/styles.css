@@ -1,0 +1,162 @@
+:root {
+  --cell: 15px;
+  --gap: 3px;
+  --ink: #1c1a17;
+  --muted: #6b665f;
+  --faint: #8b857c;
+  --line: #e6e3de;
+  --paper: #f5f4f1;
+  --l0: #eceae6;
+  --l1: #e0cbab;
+  --l2: #c69a68;
+  --l3: #96633a;
+  --l4: #553019;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+
+.page { max-width: 680px; margin: 0 auto; padding: 16px; }
+
+.head { margin-bottom: 16px; }
+.head h1 {
+  font: 400 26px/1.2 Georgia, "Times New Roman", serif;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+.sub { margin: 6px 0 0; font-size: 13px; color: var(--muted); }
+
+.card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px;
+  margin-bottom: 14px;
+}
+.card h2 { font: 400 17px/1.3 Georgia, serif; margin: 0; }
+.card h2.quiet { font: 400 13px/1.3 ui-sans-serif, system-ui, sans-serif; color: var(--muted); margin-bottom: 10px; }
+
+.note {
+  border: 1px solid #c9a227;
+  background: #fdf6e3;
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+/* календарь */
+.cal { display: flex; gap: 6px; }
+.dow { flex: 0 0 26px; padding-top: 18px; }
+.dow span {
+  display: block;
+  height: var(--cell);
+  margin-bottom: var(--gap);
+  font-size: 9px;
+  line-height: var(--cell);
+  color: var(--faint);
+}
+.scroll { flex: 1; overflow-x: auto; padding-bottom: 4px; }
+.track { width: calc(53 * (var(--cell) + var(--gap))); }
+.months { position: relative; height: 18px; }
+.months span { position: absolute; font-size: 10px; color: var(--faint); }
+
+.weeks { display: flex; gap: var(--gap); }
+.week { display: flex; flex-direction: column; gap: var(--gap); }
+.cell {
+  width: var(--cell);
+  height: var(--cell);
+  padding: 0;
+  border: 1px solid rgba(0,0,0,.05);
+  border-radius: 3px;
+  background: var(--l0);
+  cursor: pointer;
+}
+.cell.l0 { background: var(--l0); }
+.cell.l1 { background: var(--l1); }
+.cell.l2 { background: var(--l2); }
+.cell.l3 { background: var(--l3); }
+.cell.l4 { background: var(--l4); }
+.cell.future { background: transparent; opacity: .25; cursor: default; }
+.cell.sel { outline: 2px solid var(--ink); outline-offset: -2px; }
+.cell:focus-visible { outline: 2px solid #2f6fd0; outline-offset: 1px; }
+
+.legend {
+  display: flex; align-items: center; gap: 4px;
+  margin-top: 10px; font-size: 10px; color: var(--faint);
+}
+.sw { width: 11px; height: 11px; border-radius: 2px; border: 1px solid rgba(0,0,0,.05); }
+.sw.l0 { background: var(--l0); } .sw.l1 { background: var(--l1); }
+.sw.l2 { background: var(--l2); } .sw.l3 { background: var(--l3); }
+.sw.l4 { background: var(--l4); }
+.link {
+  margin-left: auto; background: none; border: 0; padding: 0;
+  color: var(--l3); font-size: 12px; cursor: pointer;
+}
+
+/* день */
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips:not(:empty) { margin: 12px 0; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: #f0ece6; border-radius: 999px;
+  padding: 5px 8px 5px 12px; font-size: 13px;
+}
+.chip button {
+  border: 0; background: #ded8cf; color: #5c5850;
+  width: 18px; height: 18px; border-radius: 50%;
+  font-size: 12px; line-height: 1; cursor: pointer;
+}
+/* список с галочками */
+.picker { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0; }
+.picker p { margin: 0; }
+.pick {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 6px 12px 6px 10px;
+  border: 1px solid #ded8cf; border-radius: 999px;
+  background: #fbfaf8; font-size: 13px;
+  cursor: pointer; user-select: none;
+}
+.pick:hover { border-color: #c4bbad; }
+.pick.on { background: #f3e9dc; border-color: var(--l2); }
+.pick input {
+  margin: 0; width: 15px; height: 15px;
+  accent-color: var(--l4); cursor: pointer;
+}
+.pick:focus-within { outline: 2px solid var(--l3); outline-offset: 1px; }
+
+.row { display: flex; gap: 8px; }
+
+/* предупреждение под кнопкой (display не задаём — иначе сломается [hidden]) */
+.pick-note {
+  margin: 10px 0 0;
+  padding: 8px 12px;
+  border: 1px solid #c9a227;
+  background: #fdf6e3;
+  border-radius: 8px;
+  font-size: 13px;
+}
+.primary {
+  padding: 10px 16px; font-size: 15px;
+  background: var(--l4); color: #fff;
+  border: 0; border-radius: 8px; cursor: pointer;
+}
+.primary:disabled { opacity: .5; cursor: default; }
+
+/* топ */
+.bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.bar-row .who {
+  width: 90px; flex: 0 0 90px; font-size: 14px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.bar { flex: 1; height: 8px; background: #f0ece6; border-radius: 4px; overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--l3); }
+.bar-row .n { width: 24px; text-align: right; font-size: 13px; color: var(--muted); }
+.bar-row .drop { border: 0; background: none; color: #b3aca1; font-size: 14px; cursor: pointer; padding: 0; }

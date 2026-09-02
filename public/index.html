@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>СКУД кафа</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<main class="page">
+
+  <header class="head">
+    <h1>СКУД кафа</h1>
+    <p id="summary" class="sub">Загружаю…</p>
+  </header>
+
+  <div id="note" class="note" hidden></div>
+
+  <section class="card">
+    <div class="cal">
+      <div class="dow">
+        <span>пн</span><span></span><span>ср</span><span></span><span>пт</span><span></span><span>вс</span>
+      </div>
+      <div class="scroll" id="scroll">
+        <div class="track">
+          <div class="months" id="months"></div>
+          <div class="weeks" id="weeks"></div>
+        </div>
+      </div>
+    </div>
+    <div class="legend">
+      <span>реже</span>
+      <i class="sw l0"></i><i class="sw l1"></i><i class="sw l2"></i><i class="sw l3"></i><i class="sw l4"></i>
+      <span>чаще</span>
+      <button id="jump-today" class="link">К сегодня</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2 id="day-title">—</h2>
+    <p id="day-count" class="sub"></p>
+    <div id="attendees" class="chips"></div>
+    <div id="picker" class="picker" role="group" aria-label="Кого отметить"></div>
+    <div class="row">
+      <button id="add" class="primary">Отметить</button>
+    </div>
+    <p id="pick-note" class="pick-note" role="status" hidden></p>
+  </section>
+
+  <section class="card" id="top-card" hidden>
+    <h2 class="quiet">Кто ходит чаще</h2>
+    <div id="top"></div>
+  </section>
+
+</main>
+<script src="/names.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>
