@@ -3,9 +3,6 @@
 	reverse_proxy coffee:3000
 	encode zstd gzip
 
-	# Чтобы в логах сервера был реальный адрес посетителя, а не адрес Caddy
-	header_up X-Real-IP {remote_host}
-
 	# Пароль на всё приложение: раскомментируйте и подставьте свой хеш.
 	# Хеш генерируется так:
 	#   docker compose run --rm caddy caddy hash-password --plaintext 'ваш-пароль'
