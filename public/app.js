@@ -294,16 +294,33 @@ function renderTop() {
   const top = [...tally.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
   $("top-card").hidden = top.length === 0;
 
+  const ranks = Array.isArray(window.RANKS) ? window.RANKS : [];
   const box = $("top");
   box.textContent = "";
+  let rank = 0;
+  let prevCount = null;
+
   for (const [person, n] of top) {
+    // приходов поровну — ранг тот же; иначе следующий по счёту
+    if (n !== prevCount) {
+      rank += 1;
+      prevCount = n;
+    }
+
     const row = document.createElement("div");
     row.className = "bar-row";
 
     const who = document.createElement("span");
     who.className = "who";
-    const mark = crown(person);
-    if (mark) who.appendChild(mark);
+    const badge = ranks[rank - 1];
+    if (badge) {
+      const img = document.createElement("img");
+      img.className = "rank";
+      img.src = badge;
+      img.alt = "";
+      img.title = `${rank} ранг`;
+      who.appendChild(img);
+    }
     who.append(person);
 
     const bar = document.createElement("span");

@@ -161,7 +161,7 @@ body {
   vertical-align: -5px;
 }
 .chip .crown { margin-right: -2px; }
-.who .crown { margin-right: 3px; }
+.rank { height: 20px; width: auto; vertical-align: -5px; margin-right: 5px; }
 
 /* вход */
 .auth { margin-top: 10px; font-size: 13px; color: var(--muted); }
@@ -183,7 +183,7 @@ body {
 /* топ */
 .bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .bar-row .who {
-  width: 90px; flex: 0 0 90px; font-size: 14px;
+  width: 115px; flex: 0 0 115px; font-size: 14px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .bar { flex: 1; height: 8px; background: #f0ece6; border-radius: 4px; overflow: hidden; }
