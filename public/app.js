@@ -1,7 +1,7 @@
 "use strict";
 
 const WEEKS = 53;
-const POLL_MS = 15000;
+const POLL_MS = 5000;
 const MAX_NAME = 40; // столько же, сколько принимает сервер
 
 const M_SHORT = ["янв","фев","мар","апр","май","июн","июл","авг","сен","окт","ноя","дек"];
@@ -466,7 +466,17 @@ renderAuth();
 run(() => api("GET", "/api/log"));
 
 // подтягиваем чужие отметки, пока страница открыта
+function refresh() {
+  api("GET", "/api/log").then((fresh) => { state = fresh; render(); }).catch(() => {});
+}
+
 setInterval(() => {
   if (document.hidden) return;
-  api("GET", "/api/log").then((fresh) => { state = fresh; render(); }).catch(() => {});
+  refresh();
 }, POLL_MS);
+
+// Вернулись на вкладку — обновляем сразу, не дожидаясь тика: пока вкладка была
+// в фоне, опрос не шёл, и данные могли устареть на все POLL_MS.
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) refresh();
+});
