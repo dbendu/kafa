@@ -73,6 +73,18 @@ function knownPeople() {
   return out.sort((a, b) => a.localeCompare(b, "ru"));
 }
 
+// Корона перед именем «отца-кафахлёба». Возвращает null для обычных людей,
+// чтобы вызывающий код просто не вставлял ничего.
+function crown(name) {
+  if (!requiredNames().some((r) => lower(r) === lower(name))) return null;
+  const img = document.createElement("img");
+  img.className = "crown";
+  img.src = "/crown.webp";
+  img.alt = ""; // украшение, имя и так рядом
+  img.title = "отец-основатель кафахлёбства";
+  return img;
+}
+
 // «отцы-кафахлёбы» из public/names.js: без кого день не засчитывается
 function requiredNames() {
   return (Array.isArray(window.REQUIRED) ? window.REQUIRED : [])
@@ -215,6 +227,8 @@ function renderDay() {
   for (const person of list) {
     const chip = document.createElement("span");
     chip.className = "chip";
+    const mark = crown(person);
+    if (mark) chip.appendChild(mark);
     chip.append(person);
     const x = document.createElement("button");
     x.textContent = "×";
@@ -253,7 +267,8 @@ function renderDay() {
     const text = document.createElement("span");
     text.textContent = p;
     label.classList.toggle("on", box.checked);
-    label.append(box, text);
+    const mark = crown(p);
+    label.append(box, ...(mark ? [mark] : []), text);
     picker.appendChild(label);
   }
   if (!free.length) {
@@ -287,7 +302,9 @@ function renderTop() {
 
     const who = document.createElement("span");
     who.className = "who";
-    who.textContent = person;
+    const mark = crown(person);
+    if (mark) who.appendChild(mark);
+    who.append(person);
 
     const bar = document.createElement("span");
     bar.className = "bar";

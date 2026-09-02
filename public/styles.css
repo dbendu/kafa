@@ -153,6 +153,16 @@ body {
 }
 .primary:disabled { opacity: .5; cursor: default; }
 
+/* корона перед именем отца-кафахлёба */
+.crown {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  vertical-align: -5px;
+}
+.chip .crown { margin-right: -2px; }
+.who .crown { margin-right: 3px; }
+
 /* вход */
 .auth { margin-top: 10px; font-size: 13px; color: var(--muted); }
 .auth form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
