@@ -11,6 +11,9 @@
   --l2: #c69a68;
   --l3: #96633a;
   --l4: #553019;
+  --miss: #9c4a35;       /* кидки: тёплый кирпич, чтобы не спорить с кофе */
+  --miss-soft: #f7e7e1;
+  --miss-line: #e6cdc4;
 }
 
 * { box-sizing: border-box; }
@@ -117,6 +120,9 @@ body {
   width: 18px; height: 18px; border-radius: 50%;
   font-size: 12px; line-height: 1; cursor: pointer;
 }
+/* отметки «кинул» в том же дне, но своим цветом */
+.chips.miss .chip { background: var(--miss-soft); color: #6f3527; }
+.chips.miss .chip button { background: var(--miss-line); color: #7a4030; }
 /* список с галочками */
 .picker { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0; }
 .picker p { margin: 0; }
@@ -152,6 +158,15 @@ body {
   border: 0; border-radius: 8px; cursor: pointer;
 }
 .primary:disabled { opacity: .5; cursor: default; }
+
+/* вторая кнопка дня: «кинул» — действие того же веса, но не главное */
+.ghost {
+  padding: 10px 16px; font-size: 15px;
+  background: #fff; color: var(--miss);
+  border: 1px solid var(--miss); border-radius: 8px; cursor: pointer;
+}
+.ghost:hover:not(:disabled) { background: var(--miss-soft); }
+.ghost:disabled { opacity: .45; cursor: default; }
 
 /* корона перед именем отца-кафахлёба */
 .crown {
@@ -190,3 +205,6 @@ body {
 .bar i { display: block; height: 100%; background: var(--l3); }
 .bar-row .n { width: 24px; text-align: right; font-size: 13px; color: var(--muted); }
 .bar-row .drop { border: 0; background: none; color: #b3aca1; font-size: 14px; cursor: pointer; padding: 0; }
+
+/* тот же список, но про кидки */
+#miss-top .bar i { background: var(--miss); }

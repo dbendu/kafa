@@ -20,8 +20,9 @@ services:
       # Если разворачиваете не из репозитория, уберите эту строку, иначе Docker
       # создаст на месте отсутствующего файла пустую папку.
       - ./public/names.js:/app/public/names.js:ro
-      # картинки рангов — тоже без пересборки
+      # картинки рангов и антирангов — тоже без пересборки
       - ./public/ranks:/app/public/ranks:ro
+      - ./public/antiranks:/app/public/antiranks:ro
 
   caddy:
     image: caddy:2-alpine

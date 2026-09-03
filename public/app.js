@@ -17,7 +17,8 @@ const lower = (s) => s.toLocaleLowerCase("ru");
 const today = new Date();
 today.setHours(0, 0, 0, 0);
 
-let state = { days: {}, people: [] };
+// days — кто пришёл, skips — кто обещал и кинул
+let state = { days: {}, people: [], skips: {} };
 let selected = iso(today);
 // отмеченные галочками, но ещё не сохранённые (ключ — имя в нижнем регистре)
 const picked = new Set();
@@ -217,12 +218,9 @@ function prettyDate(s) {
   return `${d} ${M_GEN[m - 1]}, ${DOW[dowMon(new Date(y, m - 1, d))]}`;
 }
 
-function renderDay() {
-  const list = state.days[selected] || [];
-  $("day-title").textContent = prettyDate(selected);
-  $("day-count").textContent = list.length ? `Пришло: ${list.length}` : "Пока никто не отмечен";
-
-  const box = $("attendees");
+// Отметки дня: имя, корона у «отцов» и крестик, чтобы снять.
+// kind — кусок пути к API: "attendees" или "skips".
+function renderChips(box, list, kind, undoLabel) {
   box.textContent = "";
   for (const person of list) {
     const chip = document.createElement("span");
@@ -232,18 +230,33 @@ function renderDay() {
     chip.append(person);
     const x = document.createElement("button");
     x.textContent = "×";
-    x.setAttribute("aria-label", `Убрать ${person}`);
+    x.setAttribute("aria-label", `${undoLabel} ${person}`);
     x.addEventListener("click", () =>
-      run(() => api("DELETE", `/api/days/${selected}/attendees/${encodeURIComponent(person)}`))
+      run(() => api("DELETE", `/api/days/${selected}/${kind}/${encodeURIComponent(person)}`))
     );
     chip.appendChild(x);
     box.appendChild(chip);
   }
+}
 
-  // выпадающий список: только те, кого сегодня ещё не отметили
-  // галочки: только те, кого в этот день ещё не отметили
+function renderDay() {
+  const list = state.days[selected] || [];
+  const missed = state.skips[selected] || [];
+  $("day-title").textContent = prettyDate(selected);
+
+  const parts = [];
+  if (list.length) parts.push(`Пришло: ${list.length}`);
+  if (missed.length) parts.push(`Кинули: ${missed.length}`);
+  $("day-count").textContent = parts.join(" · ") || "Пока никто не отмечен";
+
+  renderChips($("attendees"), list, "attendees", "Убрать");
+  renderChips($("skippers"), missed, "skips", "Снять кидок с");
+
+  // галочки: только те, у кого в этот день ещё нет никакой отметки —
+  // ни прихода, ни кидка
   const all = knownPeople();
-  const free = all.filter((p) => !list.some((x) => lower(x) === lower(p)));
+  const marked = [...list, ...missed];
+  const free = all.filter((p) => !marked.some((x) => lower(x) === lower(p)));
   // кого-то могли отметить в соседней вкладке — снимаем повисшие галочки
   for (const key of [...picked]) {
     if (!free.some((p) => lower(p) === key)) picked.delete(key);
@@ -262,7 +275,7 @@ function renderDay() {
       else picked.delete(lower(p));
       setPickNote("");
       label.classList.toggle("on", box.checked);
-      syncAddButton();
+      syncButtons();
     });
     const text = document.createElement("span");
     text.textContent = p;
@@ -277,31 +290,48 @@ function renderDay() {
     empty.textContent = all.length ? "Все уже отмечены" : "Список пуст — заполните public/names.js";
     picker.appendChild(empty);
   }
-  syncAddButton();
+  syncButtons();
 }
 
-function syncAddButton() {
-  const btn = $("add");
-  btn.disabled = picked.size === 0;
-  btn.textContent = picked.size > 1 ? `Отметить (${picked.size})` : "Отметить";
+// Галочки общие для обеих кнопок: выбрали людей и решили, пришли они или кинули.
+function syncButtons() {
+  const n = picked.size;
+  const add = $("add");
+  add.disabled = n === 0;
+  add.textContent = n > 1 ? `Отметить (${n})` : "Отметить";
+  const miss = $("miss");
+  miss.disabled = n === 0;
+  miss.textContent = n > 1 ? `Кинули (${n})` : "Кинул";
 }
 
-function renderTop() {
-  const tally = new Map();
-  for (const list of Object.values(state.days)) {
-    for (const p of list) tally.set(p, (tally.get(p) || 0) + 1);
+// Пятёрка лидеров мешка: [[имя, сколько раз], …] по убыванию.
+function tally(bag) {
+  const counts = new Map();
+  for (const list of Object.values(bag)) {
+    for (const p of list) counts.set(p, (counts.get(p) || 0) + 1);
   }
-  const top = [...tally.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
-  $("top-card").hidden = top.length === 0;
+  return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+}
 
+function renderTops() {
   const ranks = Array.isArray(window.RANKS) ? window.RANKS : [];
-  const box = $("top");
+  const antiranks = Array.isArray(window.ANTIRANKS) ? window.ANTIRANKS : [];
+  renderRating("top-card", "top", tally(state.days), ranks, "ранг");
+  renderRating("miss-card", "miss-top", tally(state.skips), antiranks, "антиранг");
+}
+
+// Полоски с именами: одинаковые для приходов и для кидков, разница только
+// в картинках рангов и в цвете (его задаёт css по id карточки).
+function renderRating(cardId, boxId, top, badges, rankWord) {
+  $(cardId).hidden = top.length === 0;
+
+  const box = $(boxId);
   box.textContent = "";
   let rank = 0;
   let prevCount = null;
 
   for (const [person, n] of top) {
-    // приходов поровну — ранг тот же; иначе следующий по счёту
+    // счёт поровну — ранг тот же; иначе следующий по счёту
     if (n !== prevCount) {
       rank += 1;
       prevCount = n;
@@ -312,13 +342,13 @@ function renderTop() {
 
     const who = document.createElement("span");
     who.className = "who";
-    const badge = ranks[rank - 1];
+    const badge = badges[rank - 1];
     if (badge) {
       const img = document.createElement("img");
       img.className = "rank";
       img.src = badge;
       img.alt = "";
-      img.title = `${rank} ранг`;
+      img.title = `${rank} ${rankWord}`;
       who.appendChild(img);
     }
     who.append(person);
@@ -336,9 +366,9 @@ function renderTop() {
     const drop = document.createElement("button");
     drop.className = "drop";
     drop.textContent = "×";
-    drop.setAttribute("aria-label", `Удалить ${person} из всех дней`);
+    drop.setAttribute("aria-label", `Удалить ${person} из всех дней и кидков`);
     drop.addEventListener("click", () => {
-      if (confirm(`Удалить ${person} из всех дней?`)) {
+      if (confirm(`Удалить ${person} из всех дней и кидков?`)) {
         run(() => api("DELETE", `/api/people/${encodeURIComponent(person)}`));
       }
     });
@@ -351,15 +381,18 @@ function renderTop() {
 function renderSummary() {
   const days = Object.keys(state.days).length;
   const visits = Object.values(state.days).reduce((s, v) => s + v.length, 0);
-  $("summary").textContent = days
-    ? `${visits} приходов за ${days} дней.`
-    : "Пока пусто. Отметьте первого — и день окрасится.";
+  const misses = Object.values(state.skips).reduce((s, v) => s + v.length, 0);
+  if (!days && !misses) {
+    $("summary").textContent = "Пока пусто. Отметьте первого — и день окрасится.";
+    return;
+  }
+  $("summary").textContent = `${visits} приходов за ${days} дней.` + (misses ? ` Кидков: ${misses}.` : "");
 }
 
 function render() {
   paintGrid();
   renderDay();
-  renderTop();
+  renderTops();
   renderSummary();
 }
 
@@ -426,13 +459,16 @@ $("auth-form").addEventListener("submit", async (e) => {
 
 // ---------- действия ----------
 
-function addPicked() {
+// kind — что записываем: "attendees" (пришли) или "skips" (кинули).
+function addPicked(kind) {
   const names = knownPeople().filter((p) => picked.has(lower(p)));
   if (!names.length) return;
 
+  // Правило «без отцов день не засчитывается» — про приходы. Кидок днём кафы
+  // не считается, поэтому его этой проверкой не держим.
   // Проверяем день целиком, а не только галочки: если кто-то из обязательных
   // уже отмечен раньше, добавлять к нему остальных можно свободно.
-  const required = requiredNames();
+  const required = kind === "attendees" ? requiredNames() : [];
   if (required.length) {
     const after = [...(state.days[selected] || []), ...names];
     const ok = required.some((r) => after.some((p) => lower(p) === lower(r)));
@@ -443,14 +479,15 @@ function addPicked() {
   }
 
   run(async () => {
-    const fresh = await api("POST", `/api/days/${selected}/attendees`, { names });
+    const fresh = await api("POST", `/api/days/${selected}/${kind}`, { names });
     picked.clear(); // чистим только после успеха, иначе выбор пропадёт зря
     setPickNote("");
     return fresh;
   });
 }
 
-$("add").addEventListener("click", addPicked);
+$("add").addEventListener("click", () => addPicked("attendees"));
+$("miss").addEventListener("click", () => addPicked("skips"));
 $("jump-today").addEventListener("click", () => {
   selected = iso(today);
   picked.clear();

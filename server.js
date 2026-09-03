@@ -19,18 +19,25 @@ const authOn = Boolean(AUTH_USER && AUTH_PASS);
 
 // ---------- хранилище ----------
 
-let state = { days: {}, people: [] };
+// days — кто пришёл, skips — кто обещал и кинул. Мешки устроены одинаково:
+// "ГГГГ-ММ-ДД" -> список имён.
+let state = { days: {}, people: [], skips: {} };
 let writeChain = Promise.resolve();
 
 async function load() {
   try {
     const raw = await fs.readFile(DATA_FILE, "utf8");
     const parsed = JSON.parse(raw);
+    const bag = (v) => (v && typeof v === "object" ? v : {});
     state = {
-      days: parsed && typeof parsed.days === "object" && parsed.days ? parsed.days : {},
+      days: bag(parsed && parsed.days),
       people: Array.isArray(parsed && parsed.people) ? parsed.people : [],
+      skips: bag(parsed && parsed.skips), // в старых файлах ключа нет — это нормально
     };
-    console.log(`Загружено: ${Object.keys(state.days).length} дней, ${state.people.length} человек`);
+    const misses = Object.values(state.skips).reduce((s, v) => s + v.length, 0);
+    console.log(
+      `Загружено: ${Object.keys(state.days).length} дней, ${state.people.length} человек, ${misses} кидков`
+    );
   } catch (err) {
     if (err.code === "ENOENT") {
       console.log(`Файл ${DATA_FILE} не найден, создаю пустой`);
@@ -90,31 +97,48 @@ function allowed(req) {
 
 // ---------- операции ----------
 
+// Кусок пути -> мешок в состоянии. Отметки двух видов устроены одинаково,
+// поэтому обе операции общие, а вид приходит параметром.
+const KINDS = { attendees: "days", skips: "skips" };
+const opposite = (kind) => (kind === "days" ? "skips" : "days");
+// Только свои ключи: иначе /api/days/:date/constructor сошёл бы за путь.
+const kindOf = (seg) => (Object.hasOwn(KINDS, seg) ? KINDS[seg] : null);
+
 // Пишем всю группу разом: один persist вместо одного на каждое имя.
-function addAttendees(date, names) {
-  const list = [...(state.days[date] || [])];
+function addMarks(kind, date, names) {
+  const list = [...(state[kind][date] || [])];
   for (const name of names) {
     if (!list.some((x) => sameName(x, name))) list.push(name);
     if (!state.people.some((x) => sameName(x, name))) state.people.push(name);
   }
-  if (list.length) state.days[date] = list;
+  if (list.length) state[kind][date] = list;
+
+  // Прийти и кинуть в один и тот же день нельзя: новая отметка снимает старую.
+  const back = opposite(kind);
+  const rest = (state[back][date] || []).filter((x) => !names.some((n) => sameName(x, n)));
+  if (rest.length) state[back][date] = rest;
+  else delete state[back][date];
+
   return persist();
 }
 
-function removeAttendee(date, name) {
-  const list = (state.days[date] || []).filter((x) => !sameName(x, name));
-  if (list.length) state.days[date] = list;
-  else delete state.days[date];
+function removeMark(kind, date, name) {
+  const list = (state[kind][date] || []).filter((x) => !sameName(x, name));
+  if (list.length) state[kind][date] = list;
+  else delete state[kind][date];
   return persist();
 }
 
+// Забываем человека целиком: и приходы, и кидки.
 function forgetPerson(name) {
-  const days = {};
-  for (const [date, list] of Object.entries(state.days)) {
-    const kept = list.filter((x) => !sameName(x, name));
-    if (kept.length) days[date] = kept;
+  for (const kind of Object.values(KINDS)) {
+    const kept = {};
+    for (const [date, list] of Object.entries(state[kind])) {
+      const rest = list.filter((x) => !sameName(x, name));
+      if (rest.length) kept[date] = rest;
+    }
+    state[kind] = kept;
   }
-  state.days = days;
   state.people = state.people.filter((x) => !sameName(x, name));
   return persist();
 }
@@ -201,8 +225,10 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, state);
   }
 
-  // POST /api/days/:date/attendees
-  if (req.method === "POST" && seg.length === 4 && seg[1] === "days" && seg[3] === "attendees") {
+  // POST /api/days/:date/attendees — пришли
+  // POST /api/days/:date/skips     — обещали и кинули
+  if (req.method === "POST" && seg.length === 4 && seg[1] === "days" && kindOf(seg[3])) {
+    const kind = kindOf(seg[3]);
     const date = decodeURIComponent(seg[2]);
     if (!validDate(date)) return sendJson(res, 400, { error: "Дата должна быть в формате ГГГГ-ММ-ДД" });
     let body;
@@ -227,17 +253,18 @@ async function handleApi(req, res, url) {
       names.push(name);
     }
     if (!names.length) return sendJson(res, 400, { error: "Не указано ни одного имени" });
-    await addAttendees(date, names);
+    await addMarks(kind, date, names);
     return sendJson(res, 200, state);
   }
 
-  // DELETE /api/days/:date/attendees/:name
-  if (req.method === "DELETE" && seg.length === 5 && seg[1] === "days" && seg[3] === "attendees") {
+  // DELETE /api/days/:date/attendees/:name | /api/days/:date/skips/:name
+  if (req.method === "DELETE" && seg.length === 5 && seg[1] === "days" && kindOf(seg[3])) {
+    const kind = kindOf(seg[3]);
     const date = decodeURIComponent(seg[2]);
     const name = cleanName(decodeURIComponent(seg[4]));
     if (!validDate(date)) return sendJson(res, 400, { error: "Дата должна быть в формате ГГГГ-ММ-ДД" });
     if (!name) return sendJson(res, 400, { error: "Не указано имя" });
-    await removeAttendee(date, name);
+    await removeMark(kind, date, name);
     return sendJson(res, 200, state);
   }
 

@@ -40,9 +40,11 @@
     <h2 id="day-title">—</h2>
     <p id="day-count" class="sub"></p>
     <div id="attendees" class="chips"></div>
+    <div id="skippers" class="chips miss"></div>
     <div id="picker" class="picker" role="group" aria-label="Кого отметить"></div>
     <div class="row">
       <button id="add" class="primary">Отметить</button>
+      <button id="miss" class="ghost">Кинул</button>
     </div>
     <p id="pick-note" class="pick-note" role="status" hidden></p>
 
@@ -61,6 +63,11 @@
   <section class="card" id="top-card" hidden>
     <h2 class="quiet">Кто ходит чаще</h2>
     <div id="top"></div>
+  </section>
+
+  <section class="card" id="miss-card" hidden>
+    <h2 class="quiet">Кто чаще кидает</h2>
+    <div id="miss-top"></div>
   </section>
 
 </main>
