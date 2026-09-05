@@ -475,7 +475,7 @@ function renderSummary() {
     return;
   }
   $("summary").textContent =
-    `${visits} приходов за ${days} дней.` +
+    `${visits} приходов за ${days} сборищ.` +
     (misses ? ` Кидков: ${misses}.` : "") +
     (fails ? ` Косяков: ${fails}.` : "");
 }
