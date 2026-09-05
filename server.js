@@ -117,15 +117,6 @@ function dropNames(bag, date, names) {
   else delete bag[date];
 }
 
-// Убирает человека из всех дней мешка.
-function dropEverywhere(bag, name) {
-  for (const [date, list] of Object.entries(bag)) {
-    const rest = list.filter((x) => !sameName(x, name));
-    if (rest.length) bag[date] = rest;
-    else delete bag[date];
-  }
-}
-
 // Кого отметили впервые — тот пополняет общий список людей.
 function rememberPeople(names) {
   for (const name of names) {
@@ -157,14 +148,6 @@ function removeAttendee(date, name) {
 
 function removeSkip(date, name) {
   dropNames(state.skips, date, [name]);
-  return persist();
-}
-
-// Забываем человека целиком: и приходы, и кидки.
-function forgetPerson(name) {
-  dropEverywhere(state.days, name);
-  dropEverywhere(state.skips, name);
-  state.people = state.people.filter((x) => !sameName(x, name));
   return persist();
 }
 
@@ -304,13 +287,6 @@ async function deleteSkip(res, date, name) {
   return sendJson(res, 200, state);
 }
 
-// DELETE /api/people/:name
-async function deletePerson(res, name) {
-  if (!name) return sendJson(res, 400, { error: "Не указано имя" });
-  await forgetPerson(name);
-  return sendJson(res, 200, state);
-}
-
 // ---------- маршруты ----------
 
 async function handleApi(req, res, url) {
@@ -346,10 +322,6 @@ async function handleApi(req, res, url) {
 
   if (req.method === "DELETE" && isDay(5) && seg[3] === "skips") {
     return deleteSkip(res, decodeURIComponent(seg[2]), cleanName(decodeURIComponent(seg[4])));
-  }
-
-  if (req.method === "DELETE" && seg.length === 3 && seg[1] === "people") {
-    return deletePerson(res, cleanName(decodeURIComponent(seg[2])));
   }
 
   return sendJson(res, 404, { error: "Неизвестный метод API" });

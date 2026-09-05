@@ -386,13 +386,7 @@ function renderBars(box, top, badges, rankWord) {
     num.className = "n";
     num.textContent = n;
 
-    const drop = document.createElement("button");
-    drop.className = "drop";
-    drop.textContent = "×";
-    drop.setAttribute("aria-label", `Удалить ${person} из всех дней и кидков`);
-    drop.addEventListener("click", () => forgetPerson(person));
-
-    row.append(who, bar, num, drop);
+    row.append(who, bar, num);
     box.appendChild(row);
   }
 }
@@ -526,12 +520,6 @@ function removeAttendee(person) {
 
 function removeSkip(person) {
   run(() => api("DELETE", `/api/days/${selected}/skips/${encodeURIComponent(person)}`));
-}
-
-// Из рейтингов: убрать человека изо всех дней и кидков сразу.
-function forgetPerson(person) {
-  if (!confirm(`Удалить ${person} из всех дней и кидков?`)) return;
-  run(() => api("DELETE", `/api/people/${encodeURIComponent(person)}`));
 }
 
 $("add").addEventListener("click", markAttendance);

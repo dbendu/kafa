@@ -204,7 +204,6 @@ body {
 .bar { flex: 1; height: 8px; background: #f0ece6; border-radius: 4px; overflow: hidden; }
 .bar i { display: block; height: 100%; background: var(--l3); }
 .bar-row .n { width: 24px; text-align: right; font-size: 13px; color: var(--muted); }
-.bar-row .drop { border: 0; background: none; color: #b3aca1; font-size: 14px; cursor: pointer; padding: 0; }
 
 /* тот же список, но про кидки */
 #miss-top .bar i { background: var(--miss); }
