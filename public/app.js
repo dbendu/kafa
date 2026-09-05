@@ -17,8 +17,8 @@ const lower = (s) => s.toLocaleLowerCase("ru");
 const today = new Date();
 today.setHours(0, 0, 0, 0);
 
-// days — кто пришёл, skips — кто обещал и кинул
-let state = { days: {}, people: [], skips: {} };
+// days — кто пришёл, skips — кто обещал и кинул, fails — кто накосячил
+let state = { days: {}, people: [], skips: {}, fails: {} };
 let selected = iso(today);
 // отмеченные галочками, но ещё не сохранённые (ключ — имя в нижнем регистре)
 const picked = new Set();
@@ -134,9 +134,20 @@ function showNote(text) {
   el.hidden = !text;
 }
 
+// Страница может оказаться новее сервера — например, контейнер не пересобрали.
+// Тогда в ответе не окажется мешка fails, и отрисовка упала бы на пустом месте.
+function adopt(fresh) {
+  return {
+    days: fresh.days || {},
+    people: fresh.people || [],
+    skips: fresh.skips || {},
+    fails: fresh.fails || {},
+  };
+}
+
 async function run(fn) {
   try {
-    state = await fn();
+    state = adopt(await fn());
     showNote("");
   } catch (err) {
     // handled — про ошибку уже сказано в карточке дня, верхний баннер не нужен
@@ -251,24 +262,37 @@ function renderSkippers(list) {
   }
 }
 
+// Кто накосячил: крестик снимает косяк.
+function renderFails(list) {
+  const box = $("fails");
+  box.textContent = "";
+  for (const person of list) {
+    box.appendChild(makeChip(person, "Снять косяк с", () => removeFail(person)));
+  }
+}
+
 function renderDay() {
   const list = state.days[selected] || [];
   const missed = state.skips[selected] || [];
+  const botched = state.fails[selected] || [];
   $("day-title").textContent = prettyDate(selected);
 
   const parts = [];
   if (list.length) parts.push(`Пришло: ${list.length}`);
   if (missed.length) parts.push(`Кинули: ${missed.length}`);
+  if (botched.length) parts.push(`Косяков: ${botched.length}`);
   $("day-count").textContent = parts.join(" · ") || "Пока никто не отмечен";
 
   renderAttendees(list);
   renderSkippers(missed);
+  renderFails(botched);
 
-  // галочки: только те, у кого в этот день ещё нет никакой отметки —
-  // ни прихода, ни кидка
+  // Галочки: человек пропадает из списка, только когда отмечать в этом дне
+  // больше нечего — есть и приход (или кидок), и косяк. Косяк с приходом
+  // не спорит: можно прийти и всё равно накосячить.
   const all = knownPeople();
-  const marked = [...list, ...missed];
-  const free = all.filter((p) => !marked.some((x) => lower(x) === lower(p)));
+  const has = (bag, p) => bag.some((x) => lower(x) === lower(p));
+  const free = all.filter((p) => !((has(list, p) || has(missed, p)) && has(botched, p)));
   // кого-то могли отметить в соседней вкладке — снимаем повисшие галочки
   for (const key of [...picked]) {
     if (!free.some((p) => lower(p) === key)) picked.delete(key);
@@ -305,7 +329,7 @@ function renderDay() {
   syncButtons();
 }
 
-// Галочки общие для обеих кнопок: выбрали людей и решили, пришли они или кинули.
+// Галочки общие для всех кнопок: выбрали людей и решили, что с ними случилось.
 function syncButtons() {
   const n = picked.size;
   const add = $("add");
@@ -314,6 +338,9 @@ function syncButtons() {
   const miss = $("miss");
   miss.disabled = n === 0;
   miss.textContent = n > 1 ? `Кинули (${n})` : "Кинул";
+  const fail = $("fail");
+  fail.disabled = n === 0;
+  fail.textContent = n > 1 ? `Косяки (${n})` : "Косяк";
 }
 
 // Рейтинг мешка: [[имя, сколько раз], …] без порядка — сортирует вызывающий.
@@ -359,6 +386,7 @@ function withRanks(rows) {
 function renderTops() {
   renderTopAttendees();
   renderTopSkippers();
+  renderTopFails();
 }
 
 // Кто ходит чаще, тот выше: картинки рангов из window.RANKS. В списке весь
@@ -382,6 +410,18 @@ function renderTopSkippers() {
   $("miss-card").hidden = rows.length === 0;
   renderBars($("miss-top"), rows, {
     badges: Array.isArray(window.ANTIRANKS) ? window.ANTIRANKS : [],
+    rankWord: "антиранг",
+  });
+}
+
+// Кто чаще косячит: картинки из window.FAILRANKS. Как и в кидках, тех, за кем
+// косяков нет, в списке не показываем.
+function renderTopFails() {
+  const botched = tally(state.fails).filter(([, n]) => n > 0);
+  const rows = withRanks(botched.sort(mostFirst));
+  $("fail-card").hidden = rows.length === 0;
+  renderBars($("fail-top"), rows, {
+    badges: Array.isArray(window.FAILRANKS) ? window.FAILRANKS : [],
     rankWord: "антиранг",
   });
 }
@@ -426,13 +466,18 @@ function renderBars(box, rows, { badges, rankWord }) {
 
 function renderSummary() {
   const days = Object.keys(state.days).length;
-  const visits = Object.values(state.days).reduce((s, v) => s + v.length, 0);
-  const misses = Object.values(state.skips).reduce((s, v) => s + v.length, 0);
-  if (!days && !misses) {
+  const total = (bag) => Object.values(bag).reduce((s, v) => s + v.length, 0);
+  const visits = total(state.days);
+  const misses = total(state.skips);
+  const fails = total(state.fails);
+  if (!days && !misses && !fails) {
     $("summary").textContent = "Пока пусто. Отметьте первого — и день окрасится.";
     return;
   }
-  $("summary").textContent = `${visits} приходов за ${days} дней.` + (misses ? ` Кидков: ${misses}.` : "");
+  $("summary").textContent =
+    `${visits} приходов за ${days} дней.` +
+    (misses ? ` Кидков: ${misses}.` : "") +
+    (fails ? ` Косяков: ${fails}.` : "");
 }
 
 function render() {
@@ -547,6 +592,14 @@ function markSkip() {
   sendMarks(`/api/days/${selected}/skips`, names);
 }
 
+// Косяк. Как и кидок, правилом «отцов» не ограничен: накосячить можно и в день
+// без кафы.
+function markFail() {
+  const names = pickedNames();
+  if (!names.length) return;
+  sendMarks(`/api/days/${selected}/fails`, names);
+}
+
 function removeAttendee(person) {
   run(() => api("DELETE", `/api/days/${selected}/attendees/${encodeURIComponent(person)}`));
 }
@@ -555,8 +608,13 @@ function removeSkip(person) {
   run(() => api("DELETE", `/api/days/${selected}/skips/${encodeURIComponent(person)}`));
 }
 
+function removeFail(person) {
+  run(() => api("DELETE", `/api/days/${selected}/fails/${encodeURIComponent(person)}`));
+}
+
 $("add").addEventListener("click", markAttendance);
 $("miss").addEventListener("click", markSkip);
+$("fail").addEventListener("click", markFail);
 $("jump-today").addEventListener("click", () => {
   selected = iso(today);
   picked.clear();
@@ -573,7 +631,7 @@ run(() => api("GET", "/api/log"));
 
 // подтягиваем чужие отметки, пока страница открыта
 function refresh() {
-  api("GET", "/api/log").then((fresh) => { state = fresh; render(); }).catch(() => {});
+  api("GET", "/api/log").then((fresh) => { state = adopt(fresh); render(); }).catch(() => {});
 }
 
 setInterval(() => {

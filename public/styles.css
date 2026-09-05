@@ -14,6 +14,9 @@
   --miss: #9c4a35;       /* кидки: тёплый кирпич, чтобы не спорить с кофе */
   --miss-soft: #f7e7e1;
   --miss-line: #e6cdc4;
+  --fail: #8a7320;       /* косяки: жёлтая карточка, третий цвет после кофе и кирпича */
+  --fail-soft: #f7f0d8;
+  --fail-line: #e8ddb4;
 }
 
 * { box-sizing: border-box; }
@@ -123,6 +126,9 @@ body {
 /* отметки «кинул» в том же дне, но своим цветом */
 .chips.miss .chip { background: var(--miss-soft); color: #6f3527; }
 .chips.miss .chip button { background: var(--miss-line); color: #7a4030; }
+/* и «косяк» — своим */
+.chips.fail .chip { background: var(--fail-soft); color: #6b5a13; }
+.chips.fail .chip button { background: var(--fail-line); color: #756318; }
 /* список с галочками */
 .picker { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0; }
 .picker p { margin: 0; }
@@ -168,6 +174,10 @@ body {
 .ghost:hover:not(:disabled) { background: var(--miss-soft); }
 .ghost:disabled { opacity: .45; cursor: default; }
 
+/* третья кнопка дня: «косяк» — тот же вес, свой цвет */
+.ghost.fail { color: var(--fail); border-color: var(--fail); }
+.ghost.fail:hover:not(:disabled) { background: var(--fail-soft); }
+
 /* корона перед именем отца-кафахлёба */
 .crown {
   width: 20px;
@@ -207,3 +217,6 @@ body {
 
 /* тот же список, но про кидки */
 #miss-top .bar i { background: var(--miss); }
+
+/* и про косяки */
+#fail-top .bar i { background: var(--fail); }

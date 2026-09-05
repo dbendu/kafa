@@ -42,10 +42,12 @@
     <p id="day-count" class="sub"></p>
     <div id="attendees" class="chips"></div>
     <div id="skippers" class="chips miss"></div>
+    <div id="fails" class="chips fail"></div>
     <div id="picker" class="picker" role="group" aria-label="Кого отметить"></div>
     <div class="row">
       <button id="add" class="primary">Отметить</button>
       <button id="miss" class="ghost">Кинул</button>
+      <button id="fail" class="ghost fail">Косяк</button>
     </div>
     <p id="pick-note" class="pick-note" role="status" hidden></p>
 
@@ -69,6 +71,11 @@
   <section class="card" id="miss-card" hidden>
     <h2 class="quiet">Кидают</h2>
     <div id="miss-top"></div>
+  </section>
+
+  <section class="card" id="fail-card" hidden>
+    <h2 class="quiet">Косячат</h2>
+    <div id="fail-top"></div>
   </section>
 
 </main>

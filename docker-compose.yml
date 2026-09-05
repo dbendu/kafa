@@ -23,6 +23,7 @@ services:
       # картинки рангов и антирангов — тоже без пересборки
       - ./public/ranks:/app/public/ranks:ro
       - ./public/antiranks:/app/public/antiranks:ro
+      - ./public/fails:/app/public/fails:ro
 
   caddy:
     image: caddy:2-alpine

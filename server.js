@@ -19,9 +19,9 @@ const authOn = Boolean(AUTH_USER && AUTH_PASS);
 
 // ---------- хранилище ----------
 
-// days — кто пришёл, skips — кто обещал и кинул. Мешки устроены одинаково:
-// "ГГГГ-ММ-ДД" -> список имён.
-let state = { days: {}, people: [], skips: {} };
+// days — кто пришёл, skips — кто обещал и кинул, fails — кто накосячил.
+// Мешки устроены одинаково: "ГГГГ-ММ-ДД" -> список имён.
+let state = { days: {}, people: [], skips: {}, fails: {} };
 let writeChain = Promise.resolve();
 
 async function load() {
@@ -29,14 +29,16 @@ async function load() {
     const raw = await fs.readFile(DATA_FILE, "utf8");
     const parsed = JSON.parse(raw);
     const bag = (v) => (v && typeof v === "object" ? v : {});
+    const count = (b) => Object.values(b).reduce((s, v) => s + v.length, 0);
     state = {
       days: bag(parsed && parsed.days),
       people: Array.isArray(parsed && parsed.people) ? parsed.people : [],
       skips: bag(parsed && parsed.skips), // в старых файлах ключа нет — это нормально
+      fails: bag(parsed && parsed.fails),
     };
-    const misses = Object.values(state.skips).reduce((s, v) => s + v.length, 0);
     console.log(
-      `Загружено: ${Object.keys(state.days).length} дней, ${state.people.length} человек, ${misses} кидков`
+      `Загружено: ${Object.keys(state.days).length} дней, ${state.people.length} человек, ` +
+        `${count(state.skips)} кидков, ${count(state.fails)} косяков`
     );
   } catch (err) {
     if (err.code === "ENOENT") {
@@ -148,6 +150,19 @@ function removeAttendee(date, name) {
 
 function removeSkip(date, name) {
   dropNames(state.skips, date, [name]);
+  return persist();
+}
+
+// Косяк живёт сам по себе: человек мог прийти и всё равно накосячить,
+// поэтому другие отметки эта пара функций не трогает.
+function addFails(date, names) {
+  putNames(state.fails, date, names);
+  rememberPeople(names);
+  return persist();
+}
+
+function removeFail(date, name) {
+  dropNames(state.fails, date, [name]);
   return persist();
 }
 
@@ -287,6 +302,23 @@ async function deleteSkip(res, date, name) {
   return sendJson(res, 200, state);
 }
 
+// POST /api/days/:date/fails — накосячил
+async function postFails(req, res, date) {
+  if (!validDate(date)) return sendJson(res, 400, { error: BAD_DATE });
+  const { names, error } = await readNames(req);
+  if (error) return sendJson(res, 400, { error });
+  await addFails(date, names);
+  return sendJson(res, 200, state);
+}
+
+// DELETE /api/days/:date/fails/:name
+async function deleteFail(res, date, name) {
+  if (!validDate(date)) return sendJson(res, 400, { error: BAD_DATE });
+  if (!name) return sendJson(res, 400, { error: "Не указано имя" });
+  await removeFail(date, name);
+  return sendJson(res, 200, state);
+}
+
 // ---------- маршруты ----------
 
 async function handleApi(req, res, url) {
@@ -316,12 +348,20 @@ async function handleApi(req, res, url) {
     return postSkips(req, res, decodeURIComponent(seg[2]));
   }
 
+  if (req.method === "POST" && isDay(4) && seg[3] === "fails") {
+    return postFails(req, res, decodeURIComponent(seg[2]));
+  }
+
   if (req.method === "DELETE" && isDay(5) && seg[3] === "attendees") {
     return deleteAttendee(res, decodeURIComponent(seg[2]), cleanName(decodeURIComponent(seg[4])));
   }
 
   if (req.method === "DELETE" && isDay(5) && seg[3] === "skips") {
     return deleteSkip(res, decodeURIComponent(seg[2]), cleanName(decodeURIComponent(seg[4])));
+  }
+
+  if (req.method === "DELETE" && isDay(5) && seg[3] === "fails") {
+    return deleteFail(res, decodeURIComponent(seg[2]), cleanName(decodeURIComponent(seg[4])));
   }
 
   return sendJson(res, 404, { error: "Неизвестный метод API" });
