@@ -199,6 +199,7 @@ public/styles.css  стили
 public/names.js    СПИСОК ИМЁН, обязательные участники, ранги — правится руками
 public/ranks/      картинки рангов, public/antiranks/ — картинки антирангов
 public/app.js      сетка, выбор дня, запросы к API
+public/favicon.png иконка вкладки
 data.json          данные, создаётся при первом запуске
 ```
 
