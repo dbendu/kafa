@@ -316,13 +316,44 @@ function syncButtons() {
   miss.textContent = n > 1 ? `Кинули (${n})` : "Кинул";
 }
 
-// Пятёрка лидеров мешка: [[имя, сколько раз], …] по убыванию.
+// Рейтинг мешка: [[имя, сколько раз], …] без порядка — сортирует вызывающий.
+// Все известные имена попадают сюда, даже с нулём: иначе тот, кто ещё ни разу
+// не приходил (или ни разу не кидал), не показался бы в рейтинге вовсе.
 function tally(bag) {
-  const counts = new Map();
+  const counts = new Map(); // ключ — имя в нижнем регистре
+  const add = (person, n) => {
+    const row = counts.get(lower(person));
+    if (row) row.n += n;
+    else counts.set(lower(person), { person, n });
+  };
+
+  // сначала список — от него берём написание имени, потом отметки
+  for (const person of knownPeople()) add(person, 0);
   for (const list of Object.values(bag)) {
-    for (const p of list) counts.set(p, (counts.get(p) || 0) + 1);
+    for (const person of list) add(person, 1);
   }
-  return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+
+  return [...counts.values()].map((row) => [row.person, row.n]);
+}
+
+// Оба рейтинга идут по убыванию счёта: сверху те, за кем больше записей.
+// Равный счёт — по алфавиту, иначе порядок зависел бы от того, как обошёлся
+// мешок.
+const mostFirst = (a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "ru");
+
+// Ранг — место в списке: 1 у первой строки, у кого счёт равный, у тех ранг
+// общий. В приходах 1 ранг у того, кто ходит чаще всех, в кидках — у того,
+// кто чаще всех кидает.
+function withRanks(rows) {
+  let rank = 0;
+  let prevCount = null;
+  return rows.map(([person, n]) => {
+    if (n !== prevCount) {
+      rank += 1;
+      prevCount = n;
+    }
+    return { person, n, rank };
+  });
 }
 
 function renderTops() {
@@ -330,42 +361,44 @@ function renderTops() {
   renderTopSkippers();
 }
 
-// Кто ходит чаще: картинки рангов из window.RANKS.
+// Кто ходит чаще, тот выше: картинки рангов из window.RANKS. В списке весь
+// состав, включая тех, кто ещё ни разу не пришёл. Но пока никто не пришёл
+// вовсе, карточку не показываем: столбик нулей ничего не говорит.
 function renderTopAttendees() {
-  const top = tally(state.days);
-  const badges = Array.isArray(window.RANKS) ? window.RANKS : [];
-  $("top-card").hidden = top.length === 0;
-  renderBars($("top"), top, badges, "ранг");
+  const rows = withRanks(tally(state.days).sort(mostFirst));
+  $("top-card").hidden = !rows.some(({ n }) => n > 0);
+  renderBars($("top"), rows, {
+    badges: Array.isArray(window.RANKS) ? window.RANKS : [],
+    rankWord: "ранг",
+  });
 }
 
-// Кто чаще кидает: свои картинки, антиранги из window.ANTIRANKS.
+// Кто чаще кидает, тот выше: свои картинки, антиранги из window.ANTIRANKS.
+// Тех, кто не кидал ни разу, в этот список не берём: он про кидки, а не про
+// весь состав. В приходах наоборот — там ноль тоже результат.
 function renderTopSkippers() {
-  const top = tally(state.skips);
-  const badges = Array.isArray(window.ANTIRANKS) ? window.ANTIRANKS : [];
-  $("miss-card").hidden = top.length === 0;
-  renderBars($("miss-top"), top, badges, "антиранг");
+  const kicked = tally(state.skips).filter(([, n]) => n > 0);
+  const rows = withRanks(kicked.sort(mostFirst));
+  $("miss-card").hidden = rows.length === 0;
+  renderBars($("miss-top"), rows, {
+    badges: Array.isArray(window.ANTIRANKS) ? window.ANTIRANKS : [],
+    rankWord: "антиранг",
+  });
 }
 
 // Полоски с именами. Рисуются одинаково для обоих списков: разница только
 // в картинках и в цвете (его задаёт css по id карточки).
-function renderBars(box, top, badges, rankWord) {
+function renderBars(box, rows, { badges, rankWord }) {
   box.textContent = "";
-  let rank = 0;
-  let prevCount = null;
+  const max = rows.reduce((m, { n }) => Math.max(m, n), 0);
 
-  for (const [person, n] of top) {
-    // счёт поровну — ранг тот же; иначе следующий по счёту
-    if (n !== prevCount) {
-      rank += 1;
-      prevCount = n;
-    }
-
+  for (const { person, n, rank } of rows) {
     const row = document.createElement("div");
     row.className = "bar-row";
 
     const who = document.createElement("span");
     who.className = "who";
-    const badge = badges[rank - 1];
+    const badge = n > 0 ? badges[rank - 1] : null; // за ноль картинки нет
     if (badge) {
       const img = document.createElement("img");
       img.className = "rank";
@@ -379,7 +412,7 @@ function renderBars(box, top, badges, rankWord) {
     const bar = document.createElement("span");
     bar.className = "bar";
     const fill = document.createElement("i");
-    fill.style.width = `${(n / top[0][1]) * 100}%`;
+    fill.style.width = max ? `${(n / max) * 100}%` : "0%";
     bar.appendChild(fill);
 
     const num = document.createElement("span");
