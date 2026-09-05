@@ -218,24 +218,36 @@ function prettyDate(s) {
   return `${d} ${M_GEN[m - 1]}, ${DOW[dowMon(new Date(y, m - 1, d))]}`;
 }
 
-// Отметки дня: имя, корона у «отцов» и крестик, чтобы снять.
-// kind — кусок пути к API: "attendees" или "skips".
-function renderChips(box, list, kind, undoLabel) {
+// Одна отметка дня: имя, корона у «отцов» и крестик, чтобы снять.
+function makeChip(person, undoLabel, undo) {
+  const chip = document.createElement("span");
+  chip.className = "chip";
+  const mark = crown(person);
+  if (mark) chip.appendChild(mark);
+  chip.append(person);
+  const x = document.createElement("button");
+  x.textContent = "×";
+  x.setAttribute("aria-label", `${undoLabel} ${person}`);
+  x.addEventListener("click", undo);
+  chip.appendChild(x);
+  return chip;
+}
+
+// Кто пришёл: крестик убирает приход.
+function renderAttendees(list) {
+  const box = $("attendees");
   box.textContent = "";
   for (const person of list) {
-    const chip = document.createElement("span");
-    chip.className = "chip";
-    const mark = crown(person);
-    if (mark) chip.appendChild(mark);
-    chip.append(person);
-    const x = document.createElement("button");
-    x.textContent = "×";
-    x.setAttribute("aria-label", `${undoLabel} ${person}`);
-    x.addEventListener("click", () =>
-      run(() => api("DELETE", `/api/days/${selected}/${kind}/${encodeURIComponent(person)}`))
-    );
-    chip.appendChild(x);
-    box.appendChild(chip);
+    box.appendChild(makeChip(person, "Убрать", () => removeAttendee(person)));
+  }
+}
+
+// Кто кинул: крестик снимает кидок.
+function renderSkippers(list) {
+  const box = $("skippers");
+  box.textContent = "";
+  for (const person of list) {
+    box.appendChild(makeChip(person, "Снять кидок с", () => removeSkip(person)));
   }
 }
 
@@ -249,8 +261,8 @@ function renderDay() {
   if (missed.length) parts.push(`Кинули: ${missed.length}`);
   $("day-count").textContent = parts.join(" · ") || "Пока никто не отмечен";
 
-  renderChips($("attendees"), list, "attendees", "Убрать");
-  renderChips($("skippers"), missed, "skips", "Снять кидок с");
+  renderAttendees(list);
+  renderSkippers(missed);
 
   // галочки: только те, у кого в этот день ещё нет никакой отметки —
   // ни прихода, ни кидка
@@ -314,18 +326,29 @@ function tally(bag) {
 }
 
 function renderTops() {
-  const ranks = Array.isArray(window.RANKS) ? window.RANKS : [];
-  const antiranks = Array.isArray(window.ANTIRANKS) ? window.ANTIRANKS : [];
-  renderRating("top-card", "top", tally(state.days), ranks, "ранг");
-  renderRating("miss-card", "miss-top", tally(state.skips), antiranks, "антиранг");
+  renderTopAttendees();
+  renderTopSkippers();
 }
 
-// Полоски с именами: одинаковые для приходов и для кидков, разница только
-// в картинках рангов и в цвете (его задаёт css по id карточки).
-function renderRating(cardId, boxId, top, badges, rankWord) {
-  $(cardId).hidden = top.length === 0;
+// Кто ходит чаще: картинки рангов из window.RANKS.
+function renderTopAttendees() {
+  const top = tally(state.days);
+  const badges = Array.isArray(window.RANKS) ? window.RANKS : [];
+  $("top-card").hidden = top.length === 0;
+  renderBars($("top"), top, badges, "ранг");
+}
 
-  const box = $(boxId);
+// Кто чаще кидает: свои картинки, антиранги из window.ANTIRANKS.
+function renderTopSkippers() {
+  const top = tally(state.skips);
+  const badges = Array.isArray(window.ANTIRANKS) ? window.ANTIRANKS : [];
+  $("miss-card").hidden = top.length === 0;
+  renderBars($("miss-top"), top, badges, "антиранг");
+}
+
+// Полоски с именами. Рисуются одинаково для обоих списков: разница только
+// в картинках и в цвете (его задаёт css по id карточки).
+function renderBars(box, top, badges, rankWord) {
   box.textContent = "";
   let rank = 0;
   let prevCount = null;
@@ -367,11 +390,7 @@ function renderRating(cardId, boxId, top, badges, rankWord) {
     drop.className = "drop";
     drop.textContent = "×";
     drop.setAttribute("aria-label", `Удалить ${person} из всех дней и кидков`);
-    drop.addEventListener("click", () => {
-      if (confirm(`Удалить ${person} из всех дней и кидков?`)) {
-        run(() => api("DELETE", `/api/people/${encodeURIComponent(person)}`));
-      }
-    });
+    drop.addEventListener("click", () => forgetPerson(person));
 
     row.append(who, bar, num, drop);
     box.appendChild(row);
@@ -459,16 +478,29 @@ $("auth-form").addEventListener("submit", async (e) => {
 
 // ---------- действия ----------
 
-// kind — что записываем: "attendees" (пришли) или "skips" (кинули).
-function addPicked(kind) {
-  const names = knownPeople().filter((p) => picked.has(lower(p)));
+// Имена из галочек — в том виде, в каком их знает список.
+function pickedNames() {
+  return knownPeople().filter((p) => picked.has(lower(p)));
+}
+
+// Отправка группы. Галочки чистим только после успеха, иначе выбор пропадёт зря.
+function sendMarks(url, names) {
+  run(async () => {
+    const fresh = await api("POST", url, { names });
+    picked.clear();
+    setPickNote("");
+    return fresh;
+  });
+}
+
+// Приход. Правило «без отцов день не засчитывается» — только про него.
+// Проверяем день целиком, а не только галочки: если кто-то из обязательных
+// уже отмечен раньше, добавлять к нему остальных можно свободно.
+function markAttendance() {
+  const names = pickedNames();
   if (!names.length) return;
 
-  // Правило «без отцов день не засчитывается» — про приходы. Кидок днём кафы
-  // не считается, поэтому его этой проверкой не держим.
-  // Проверяем день целиком, а не только галочки: если кто-то из обязательных
-  // уже отмечен раньше, добавлять к нему остальных можно свободно.
-  const required = kind === "attendees" ? requiredNames() : [];
+  const required = requiredNames();
   if (required.length) {
     const after = [...(state.days[selected] || []), ...names];
     const ok = required.some((r) => after.some((p) => lower(p) === lower(r)));
@@ -478,16 +510,32 @@ function addPicked(kind) {
     }
   }
 
-  run(async () => {
-    const fresh = await api("POST", `/api/days/${selected}/${kind}`, { names });
-    picked.clear(); // чистим только после успеха, иначе выбор пропадёт зря
-    setPickNote("");
-    return fresh;
-  });
+  sendMarks(`/api/days/${selected}/attendees`, names);
 }
 
-$("add").addEventListener("click", () => addPicked("attendees"));
-$("miss").addEventListener("click", () => addPicked("skips"));
+// Кидок. Днём кафы он не считается, поэтому проверки на отцов тут нет.
+function markSkip() {
+  const names = pickedNames();
+  if (!names.length) return;
+  sendMarks(`/api/days/${selected}/skips`, names);
+}
+
+function removeAttendee(person) {
+  run(() => api("DELETE", `/api/days/${selected}/attendees/${encodeURIComponent(person)}`));
+}
+
+function removeSkip(person) {
+  run(() => api("DELETE", `/api/days/${selected}/skips/${encodeURIComponent(person)}`));
+}
+
+// Из рейтингов: убрать человека изо всех дней и кидков сразу.
+function forgetPerson(person) {
+  if (!confirm(`Удалить ${person} из всех дней и кидков?`)) return;
+  run(() => api("DELETE", `/api/people/${encodeURIComponent(person)}`));
+}
+
+$("add").addEventListener("click", markAttendance);
+$("miss").addEventListener("click", markSkip);
 $("jump-today").addEventListener("click", () => {
   selected = iso(today);
   picked.clear();

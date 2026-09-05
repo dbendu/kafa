@@ -97,48 +97,73 @@ function allowed(req) {
 
 // ---------- операции ----------
 
-// Кусок пути -> мешок в состоянии. Отметки двух видов устроены одинаково,
-// поэтому обе операции общие, а вид приходит параметром.
-const KINDS = { attendees: "days", skips: "skips" };
-const opposite = (kind) => (kind === "days" ? "skips" : "days");
-// Только свои ключи: иначе /api/days/:date/constructor сошёл бы за путь.
-const kindOf = (seg) => (Object.hasOwn(KINDS, seg) ? KINDS[seg] : null);
+// Приходы (state.days) и кидки (state.skips) устроены одинаково — «дата ->
+// список имён», — но правила у них разные, поэтому у каждого вида отметки
+// своя пара функций. Общее — только возня с одним мешком, ниже.
 
-// Пишем всю группу разом: один persist вместо одного на каждое имя.
-function addMarks(kind, date, names) {
-  const list = [...(state[kind][date] || [])];
+// Добавляет имена в мешок, не создавая дублей.
+function putNames(bag, date, names) {
+  const list = [...(bag[date] || [])];
   for (const name of names) {
     if (!list.some((x) => sameName(x, name))) list.push(name);
+  }
+  if (list.length) bag[date] = list;
+}
+
+// Убирает имена из мешка; опустевший день не держим.
+function dropNames(bag, date, names) {
+  const rest = (bag[date] || []).filter((x) => !names.some((n) => sameName(x, n)));
+  if (rest.length) bag[date] = rest;
+  else delete bag[date];
+}
+
+// Убирает человека из всех дней мешка.
+function dropEverywhere(bag, name) {
+  for (const [date, list] of Object.entries(bag)) {
+    const rest = list.filter((x) => !sameName(x, name));
+    if (rest.length) bag[date] = rest;
+    else delete bag[date];
+  }
+}
+
+// Кого отметили впервые — тот пополняет общий список людей.
+function rememberPeople(names) {
+  for (const name of names) {
     if (!state.people.some((x) => sameName(x, name))) state.people.push(name);
   }
-  if (list.length) state[kind][date] = list;
+}
 
-  // Прийти и кинуть в один и тот же день нельзя: новая отметка снимает старую.
-  const back = opposite(kind);
-  const rest = (state[back][date] || []).filter((x) => !names.some((n) => sameName(x, n)));
-  if (rest.length) state[back][date] = rest;
-  else delete state[back][date];
-
+// Пишем всю группу разом: один persist вместо одного на каждое имя.
+// Прийти и кинуть в один и тот же день нельзя: приход снимает кидок.
+function addAttendees(date, names) {
+  putNames(state.days, date, names);
+  dropNames(state.skips, date, names);
+  rememberPeople(names);
   return persist();
 }
 
-function removeMark(kind, date, name) {
-  const list = (state[kind][date] || []).filter((x) => !sameName(x, name));
-  if (list.length) state[kind][date] = list;
-  else delete state[kind][date];
+// Зеркально приходу: кидок снимает отметку о приходе в этот день.
+function addSkips(date, names) {
+  putNames(state.skips, date, names);
+  dropNames(state.days, date, names);
+  rememberPeople(names);
+  return persist();
+}
+
+function removeAttendee(date, name) {
+  dropNames(state.days, date, [name]);
+  return persist();
+}
+
+function removeSkip(date, name) {
+  dropNames(state.skips, date, [name]);
   return persist();
 }
 
 // Забываем человека целиком: и приходы, и кидки.
 function forgetPerson(name) {
-  for (const kind of Object.values(KINDS)) {
-    const kept = {};
-    for (const [date, list] of Object.entries(state[kind])) {
-      const rest = list.filter((x) => !sameName(x, name));
-      if (rest.length) kept[date] = rest;
-    }
-    state[kind] = kept;
-  }
+  dropEverywhere(state.days, name);
+  dropEverywhere(state.skips, name);
   state.people = state.people.filter((x) => !sameName(x, name));
   return persist();
 }
@@ -207,8 +232,90 @@ async function serveStatic(res, urlPath) {
   }
 }
 
+// ---------- разбор запроса ----------
+
+const BAD_DATE = "Дата должна быть в формате ГГГГ-ММ-ДД";
+
+// Список имён из тела запроса: принимаем и одно имя, и группу —
+// {"name":"…"} либо {"names":["…","…"]}. Возвращает { names } либо { error }.
+async function readNames(req) {
+  let body;
+  try {
+    body = await readBody(req);
+  } catch {
+    return { error: "Не удалось разобрать запрос" };
+  }
+
+  const raw = Array.isArray(body.names) ? body.names : [body.name];
+  if (raw.length > MAX_BATCH) {
+    return { error: `За раз можно отметить не больше ${MAX_BATCH} человек` };
+  }
+
+  const names = [];
+  const seen = new Set();
+  for (const item of raw) {
+    const name = cleanName(item);
+    if (!name) return { error: `Имя должно быть непустым, до ${MAX_NAME} символов` };
+    const key = name.toLocaleLowerCase("ru");
+    if (seen.has(key)) continue; // дубль внутри списка
+    seen.add(key);
+    names.push(name);
+  }
+  if (!names.length) return { error: "Не указано ни одного имени" };
+  return { names };
+}
+
+// ---------- ручки API ----------
+
+// Любая изменяющая ручка отвечает новым состоянием целиком, чтобы клиенту
+// не приходилось делать отдельный GET после записи.
+
+// POST /api/days/:date/attendees — пришли
+async function postAttendees(req, res, date) {
+  if (!validDate(date)) return sendJson(res, 400, { error: BAD_DATE });
+  const { names, error } = await readNames(req);
+  if (error) return sendJson(res, 400, { error });
+  await addAttendees(date, names);
+  return sendJson(res, 200, state);
+}
+
+// POST /api/days/:date/skips — обещали и кинули
+async function postSkips(req, res, date) {
+  if (!validDate(date)) return sendJson(res, 400, { error: BAD_DATE });
+  const { names, error } = await readNames(req);
+  if (error) return sendJson(res, 400, { error });
+  await addSkips(date, names);
+  return sendJson(res, 200, state);
+}
+
+// DELETE /api/days/:date/attendees/:name
+async function deleteAttendee(res, date, name) {
+  if (!validDate(date)) return sendJson(res, 400, { error: BAD_DATE });
+  if (!name) return sendJson(res, 400, { error: "Не указано имя" });
+  await removeAttendee(date, name);
+  return sendJson(res, 200, state);
+}
+
+// DELETE /api/days/:date/skips/:name
+async function deleteSkip(res, date, name) {
+  if (!validDate(date)) return sendJson(res, 400, { error: BAD_DATE });
+  if (!name) return sendJson(res, 400, { error: "Не указано имя" });
+  await removeSkip(date, name);
+  return sendJson(res, 200, state);
+}
+
+// DELETE /api/people/:name
+async function deletePerson(res, name) {
+  if (!name) return sendJson(res, 400, { error: "Не указано имя" });
+  await forgetPerson(name);
+  return sendJson(res, 200, state);
+}
+
+// ---------- маршруты ----------
+
 async function handleApi(req, res, url) {
   const seg = url.pathname.split("/").filter(Boolean); // ["api", ...]
+  const isDay = (len) => seg.length === len && seg[1] === "days";
 
   // всё, кроме чтения, требует пароля
   if (req.method !== "GET" && !allowed(req)) {
@@ -225,55 +332,24 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, state);
   }
 
-  // POST /api/days/:date/attendees — пришли
-  // POST /api/days/:date/skips     — обещали и кинули
-  if (req.method === "POST" && seg.length === 4 && seg[1] === "days" && kindOf(seg[3])) {
-    const kind = kindOf(seg[3]);
-    const date = decodeURIComponent(seg[2]);
-    if (!validDate(date)) return sendJson(res, 400, { error: "Дата должна быть в формате ГГГГ-ММ-ДД" });
-    let body;
-    try {
-      body = await readBody(req);
-    } catch {
-      return sendJson(res, 400, { error: "Не удалось разобрать запрос" });
-    }
-    // принимаем и одно имя, и группу: {"name":"…"} либо {"names":["…","…"]}
-    const raw = Array.isArray(body.names) ? body.names : [body.name];
-    if (raw.length > MAX_BATCH) {
-      return sendJson(res, 400, { error: `За раз можно отметить не больше ${MAX_BATCH} человек` });
-    }
-    const names = [];
-    const seen = new Set();
-    for (const item of raw) {
-      const name = cleanName(item);
-      if (!name) return sendJson(res, 400, { error: `Имя должно быть непустым, до ${MAX_NAME} символов` });
-      const key = name.toLocaleLowerCase("ru");
-      if (seen.has(key)) continue;
-      seen.add(key);
-      names.push(name);
-    }
-    if (!names.length) return sendJson(res, 400, { error: "Не указано ни одного имени" });
-    await addMarks(kind, date, names);
-    return sendJson(res, 200, state);
+  if (req.method === "POST" && isDay(4) && seg[3] === "attendees") {
+    return postAttendees(req, res, decodeURIComponent(seg[2]));
   }
 
-  // DELETE /api/days/:date/attendees/:name | /api/days/:date/skips/:name
-  if (req.method === "DELETE" && seg.length === 5 && seg[1] === "days" && kindOf(seg[3])) {
-    const kind = kindOf(seg[3]);
-    const date = decodeURIComponent(seg[2]);
-    const name = cleanName(decodeURIComponent(seg[4]));
-    if (!validDate(date)) return sendJson(res, 400, { error: "Дата должна быть в формате ГГГГ-ММ-ДД" });
-    if (!name) return sendJson(res, 400, { error: "Не указано имя" });
-    await removeMark(kind, date, name);
-    return sendJson(res, 200, state);
+  if (req.method === "POST" && isDay(4) && seg[3] === "skips") {
+    return postSkips(req, res, decodeURIComponent(seg[2]));
   }
 
-  // DELETE /api/people/:name
+  if (req.method === "DELETE" && isDay(5) && seg[3] === "attendees") {
+    return deleteAttendee(res, decodeURIComponent(seg[2]), cleanName(decodeURIComponent(seg[4])));
+  }
+
+  if (req.method === "DELETE" && isDay(5) && seg[3] === "skips") {
+    return deleteSkip(res, decodeURIComponent(seg[2]), cleanName(decodeURIComponent(seg[4])));
+  }
+
   if (req.method === "DELETE" && seg.length === 3 && seg[1] === "people") {
-    const name = cleanName(decodeURIComponent(seg[2]));
-    if (!name) return sendJson(res, 400, { error: "Не указано имя" });
-    await forgetPerson(name);
-    return sendJson(res, 200, state);
+    return deletePerson(res, cleanName(decodeURIComponent(seg[2])));
   }
 
   return sendJson(res, 404, { error: "Неизвестный метод API" });
