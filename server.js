@@ -3,9 +3,10 @@
 const http = require("http");
 const fs = require("fs/promises");
 const path = require("path");
+const { Storage } = require("./storage");
 
 const PORT = Number(process.env.PORT) || 3000;
-const DATA_FILE = process.env.DATA_FILE || path.join(__dirname, "data.json");
+const DATA_FILE = process.env.DATA_FILE || path.join(__dirname, "data.sqlite");
 const PUBLIC_DIR = path.join(__dirname, "public");
 const MAX_BODY = 8 * 1024;
 const MAX_NAME = 40;
@@ -19,47 +20,12 @@ const authOn = Boolean(AUTH_USER && AUTH_PASS);
 
 // ---------- хранилище ----------
 
-// days — кто пришёл, skips — кто обещал и кинул, fails — кто накосячил.
-// Мешки устроены одинаково: "ГГГГ-ММ-ДД" -> список имён.
-let state = { days: {}, people: [], skips: {}, fails: {} };
-let writeChain = Promise.resolve();
+let storage;
 
 async function load() {
-  try {
-    const raw = await fs.readFile(DATA_FILE, "utf8");
-    const parsed = JSON.parse(raw);
-    const bag = (v) => (v && typeof v === "object" ? v : {});
-    const count = (b) => Object.values(b).reduce((s, v) => s + v.length, 0);
-    state = {
-      days: bag(parsed && parsed.days),
-      people: Array.isArray(parsed && parsed.people) ? parsed.people : [],
-      skips: bag(parsed && parsed.skips), // в старых файлах ключа нет — это нормально
-      fails: bag(parsed && parsed.fails),
-    };
-    console.log(
-      `Загружено: ${Object.keys(state.days).length} дней, ${state.people.length} человек, ` +
-        `${count(state.skips)} кидков, ${count(state.fails)} косяков`
-    );
-  } catch (err) {
-    if (err.code === "ENOENT") {
-      console.log(`Файл ${DATA_FILE} не найден, создаю пустой`);
-      await persist();
-    } else {
-      throw new Error(`Не удалось прочитать ${DATA_FILE}: ${err.message}`);
-    }
-  }
-}
-
-// Пишем через временный файл + rename, чтобы падение посреди записи
-// не оставило обрезанный JSON. Цепочка промисов сериализует записи.
-function persist() {
-  const snapshot = JSON.stringify(state, null, 2);
-  writeChain = writeChain.then(async () => {
-    const tmp = `${DATA_FILE}.tmp`;
-    await fs.writeFile(tmp, snapshot, "utf8");
-    await fs.rename(tmp, DATA_FILE);
-  });
-  return writeChain;
+  storage = new Storage(DATA_FILE);
+  const state = storage.read();
+  console.log(`Загружено: ${Object.keys(state.days).length} дней, ${state.people.length} человек`);
 }
 
 // ---------- валидация ----------
@@ -77,8 +43,6 @@ function cleanName(raw) {
   if (!n || n.length > MAX_NAME) return null;
   return n;
 }
-
-const sameName = (a, b) => a.toLocaleLowerCase("ru") === b.toLocaleLowerCase("ru");
 
 // Заголовок X-Auth: "логин:пароль", обе половины в encodeURIComponent —
 // в заголовки нельзя класть кириллицу как есть.
@@ -99,72 +63,12 @@ function allowed(req) {
 
 // ---------- операции ----------
 
-// Приходы (state.days) и кидки (state.skips) устроены одинаково — «дата ->
-// список имён», — но правила у них разные, поэтому у каждого вида отметки
-// своя пара функций. Общее — только возня с одним мешком, ниже.
-
-// Добавляет имена в мешок, не создавая дублей.
-function putNames(bag, date, names) {
-  const list = [...(bag[date] || [])];
-  for (const name of names) {
-    if (!list.some((x) => sameName(x, name))) list.push(name);
-  }
-  if (list.length) bag[date] = list;
-}
-
-// Убирает имена из мешка; опустевший день не держим.
-function dropNames(bag, date, names) {
-  const rest = (bag[date] || []).filter((x) => !names.some((n) => sameName(x, n)));
-  if (rest.length) bag[date] = rest;
-  else delete bag[date];
-}
-
-// Кого отметили впервые — тот пополняет общий список людей.
-function rememberPeople(names) {
-  for (const name of names) {
-    if (!state.people.some((x) => sameName(x, name))) state.people.push(name);
-  }
-}
-
-// Пишем всю группу разом: один persist вместо одного на каждое имя.
-// Прийти и кинуть в один и тот же день нельзя: приход снимает кидок.
-function addAttendees(date, names) {
-  putNames(state.days, date, names);
-  dropNames(state.skips, date, names);
-  rememberPeople(names);
-  return persist();
-}
-
-// Зеркально приходу: кидок снимает отметку о приходе в этот день.
-function addSkips(date, names) {
-  putNames(state.skips, date, names);
-  dropNames(state.days, date, names);
-  rememberPeople(names);
-  return persist();
-}
-
-function removeAttendee(date, name) {
-  dropNames(state.days, date, [name]);
-  return persist();
-}
-
-function removeSkip(date, name) {
-  dropNames(state.skips, date, [name]);
-  return persist();
-}
-
-// Косяк живёт сам по себе: человек мог прийти и всё равно накосячить,
-// поэтому другие отметки эта пара функций не трогает.
-function addFails(date, names) {
-  putNames(state.fails, date, names);
-  rememberPeople(names);
-  return persist();
-}
-
-function removeFail(date, name) {
-  dropNames(state.fails, date, [name]);
-  return persist();
-}
+const addAttendees = (date, names) => storage.change("days", date, names);
+const addSkips = (date, names) => storage.change("skips", date, names);
+const addFails = (date, names) => storage.change("fails", date, names);
+const removeAttendee = (date, name) => storage.change("days", date, [name], true);
+const removeSkip = (date, name) => storage.change("skips", date, [name], true);
+const removeFail = (date, name) => storage.change("fails", date, [name], true);
 
 // ---------- http ----------
 
@@ -274,7 +178,7 @@ async function postAttendees(req, res, date) {
   const { names, error } = await readNames(req);
   if (error) return sendJson(res, 400, { error });
   await addAttendees(date, names);
-  return sendJson(res, 200, state);
+  return sendJson(res, 200, storage.read());
 }
 
 // POST /api/days/:date/skips — обещали и кинули
@@ -283,7 +187,7 @@ async function postSkips(req, res, date) {
   const { names, error } = await readNames(req);
   if (error) return sendJson(res, 400, { error });
   await addSkips(date, names);
-  return sendJson(res, 200, state);
+  return sendJson(res, 200, storage.read());
 }
 
 // DELETE /api/days/:date/attendees/:name
@@ -291,7 +195,7 @@ async function deleteAttendee(res, date, name) {
   if (!validDate(date)) return sendJson(res, 400, { error: BAD_DATE });
   if (!name) return sendJson(res, 400, { error: "Не указано имя" });
   await removeAttendee(date, name);
-  return sendJson(res, 200, state);
+  return sendJson(res, 200, storage.read());
 }
 
 // DELETE /api/days/:date/skips/:name
@@ -299,7 +203,7 @@ async function deleteSkip(res, date, name) {
   if (!validDate(date)) return sendJson(res, 400, { error: BAD_DATE });
   if (!name) return sendJson(res, 400, { error: "Не указано имя" });
   await removeSkip(date, name);
-  return sendJson(res, 200, state);
+  return sendJson(res, 200, storage.read());
 }
 
 // POST /api/days/:date/fails — накосячил
@@ -308,7 +212,7 @@ async function postFails(req, res, date) {
   const { names, error } = await readNames(req);
   if (error) return sendJson(res, 400, { error });
   await addFails(date, names);
-  return sendJson(res, 200, state);
+  return sendJson(res, 200, storage.read());
 }
 
 // DELETE /api/days/:date/fails/:name
@@ -316,7 +220,7 @@ async function deleteFail(res, date, name) {
   if (!validDate(date)) return sendJson(res, 400, { error: BAD_DATE });
   if (!name) return sendJson(res, 400, { error: "Не указано имя" });
   await removeFail(date, name);
-  return sendJson(res, 200, state);
+  return sendJson(res, 200, storage.read());
 }
 
 // ---------- маршруты ----------
@@ -337,7 +241,7 @@ async function handleApi(req, res, url) {
 
   // GET /api/log
   if (req.method === "GET" && seg.length === 2 && seg[1] === "log") {
-    return sendJson(res, 200, state);
+    return sendJson(res, 200, storage.read());
   }
 
   if (req.method === "POST" && isDay(4) && seg[3] === "attendees") {
@@ -383,18 +287,18 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-// Контейнер останавливают через SIGTERM. Без обработчика процесс умрёт сразу
-// и незавершённая запись потеряется (испортить файл она не может — спасает
-// rename, — но последняя отметка не доедет до диска).
+// Дожидаемся активных HTTP-запросов перед закрытием базы.
+let stopping = false;
 function shutdown(sig) {
+  if (stopping) return;
+  stopping = true;
   console.log(`${sig}: останавливаюсь`);
-  server.close();
-  server.closeIdleConnections(); // иначе keep-alive от открытых вкладок держит нас
-  writeChain.then(
-    () => process.exit(0),
-    (err) => { console.error(err); process.exit(1); }
-  );
-  setTimeout(() => process.exit(0), 5000).unref(); // страховка от зависшей записи
+  server.close(() => {
+    storage.close();
+    process.exit(0);
+  });
+  server.closeIdleConnections();
+  setTimeout(() => process.exit(1), 5000).unref();
 }
 
 process.on("SIGTERM", () => shutdown("SIGTERM"));

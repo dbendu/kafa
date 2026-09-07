@@ -3,16 +3,14 @@ FROM node:22-alpine
 
 ENV NODE_ENV=production \
     PORT=3000 \
-    DATA_FILE=/data/data.json
+    DATA_FILE=/data/data.sqlite
 
 WORKDIR /app
 
-COPY package.json server.js ./
+COPY package.json server.js storage.js ./
 COPY public ./public
 
-# Данные держим в /data. Важно, что и data.json, и временный data.json.tmp
-# лежат в одной точке монтирования: persist() делает rename, а он не работает
-# между разными файловыми системами (EXDEV).
+# SQLite хранится в /data вместе со служебными файлами транзакций.
 RUN mkdir -p /data && chown -R node:node /data
 VOLUME /data
 

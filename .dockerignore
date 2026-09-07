@@ -11,3 +11,7 @@ Caddyfile
 .env
 Caddyfile.example
 .env.example
+
+# SQLite databases and transaction files
+*.sqlite
+*.sqlite-*

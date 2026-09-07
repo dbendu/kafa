@@ -11,3 +11,7 @@ node_modules/
 .DS_Store
 Thumbs.db
 *.swp
+
+# SQLite databases and transaction files
+*.sqlite
+*.sqlite-*
