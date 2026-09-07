@@ -37,6 +37,7 @@ const $ = (id) => document.getElementById(id);
 // значение заголовка X-Auth, чтобы не спрашивать пароль на каждое действие.
 const AUTH_KEY = "kafa-auth";
 let authHeader = "";
+let authenticated = false;
 
 try {
   authHeader = localStorage.getItem(AUTH_KEY) || "";
@@ -46,13 +47,30 @@ try {
 
 function rememberAuth(value) {
   authHeader = value;
+  authenticated = Boolean(value);
   try {
     if (value) localStorage.setItem(AUTH_KEY, value);
     else localStorage.removeItem(AUTH_KEY);
   } catch {
     // не сохранилось — пропуск проживёт до перезагрузки страницы
   }
+  if (!authenticated) {
+    $("reason-dialog").close();
+    failChoice = null;
+  }
   renderAuth();
+  renderDay();
+}
+
+async function restoreAuth() {
+  if (!authHeader) return;
+  const candidate = authHeader;
+  try {
+    const response = await fetch("/api/auth/check", { method: "POST", headers: { "X-Auth": candidate } });
+    if (candidate !== authHeader) return;
+    if (response.ok) rememberAuth(candidate);
+    else if (response.status === 401) rememberAuth("");
+  } catch { /* Пока сервер недоступен, интерфейс остаётся только для чтения. */ }
 }
 
 // В заголовки нельзя класть кириллицу как есть — кодируем обе половины
@@ -257,7 +275,7 @@ function renderDay() {
   $("day-count").textContent = parts.join(" · ") || "Пока никто не отмечен";
 
   const all = knownPeople();
-  const signature = JSON.stringify([selected, list, missed, botched, all, markPending, loaded]);
+  const signature = JSON.stringify([selected, list, missed, botched, all, markPending, loaded, authenticated]);
   if (signature === renderedDay) return;
   renderedDay = signature;
   const people = $("people");
@@ -275,7 +293,7 @@ function renderDay() {
     if (mark) label.append(mark);
     label.append(person);
     const actions = document.createElement("div");
-    actions.className = "person-actions";
+    actions.className = "person-actions" + (authenticated ? "" : " read-only");
     actions.setAttribute("role", "group");
     actions.setAttribute("aria-label", `Отметки: ${person}`);
     const count = visitsFor(selected, person);
@@ -283,15 +301,18 @@ function renderDay() {
     counter.className = "visit-counter";
     counter.setAttribute("role", "group");
     counter.setAttribute("aria-label", `Посещения: ${person}`);
-    const value = document.createElement("button");
-    value.type = "button";
+    const value = document.createElement(authenticated ? "button" : "span");
+    if (authenticated) value.type = "button";
     value.className = "visit-value";
     value.textContent = `Пришёл · ${count}`;
     value.setAttribute("aria-label", `${person}: приходов за день — ${count}`);
-    value.setAttribute("aria-disabled", "true");
-    value.tabIndex = -1;
+    if (authenticated) {
+      value.setAttribute("aria-disabled", "true");
+      value.tabIndex = -1;
+    }
     counter.classList.toggle("has-visits", count > 0);
-    for (const delta of [-1, 1]) {
+    if (!authenticated) counter.append(value);
+    for (const delta of authenticated ? [-1, 1] : []) {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "visit-step";
@@ -309,17 +330,23 @@ function renderDay() {
       ["skips", "Кинул", missed], ["fails", "Накосячил", botched],
     ]) {
       const active = bag.some(name => lower(name) === lower(person));
-      const button = document.createElement("button");
-      button.type = "button";
+      const button = document.createElement(authenticated ? "button" : "span");
+      if (authenticated) button.type = "button";
       button.className = `status-button ${kind}`;
       button.textContent = (active && kind !== "fails" ? "✓ " : "") + title;
       button.dataset.person = person;
       button.dataset.kind = kind;
-      button.setAttribute("aria-pressed", String(active));
+      button.dataset.active = String(active);
+      if (authenticated) button.setAttribute("aria-pressed", String(active));
       button.setAttribute("aria-label", `${person}: ${title}`);
-      button.title = active ? "Снять отметку" : "Поставить отметку";
-      button.disabled = markPending || !loaded;
-      button.addEventListener("click", () => toggleMark(person, kind));
+      if (authenticated) {
+        button.title = active ? "Снять отметку" : "Поставить отметку";
+        button.disabled = markPending || !loaded;
+        button.addEventListener("click", () => toggleMark(person, kind));
+      } else if (!active) {
+        button.textContent = kind === "skips" ? "Не кидал" : "Без косяков";
+        button.setAttribute("aria-label", `${person}: ${button.textContent}`);
+      }
       actions.append(button);
     }
     if (botched.some(name => lower(name) === lower(person))) {
@@ -496,7 +523,7 @@ function render() {
 // ---------- вход ----------
 
 function renderAuth() {
-  const inside = Boolean(authHeader);
+  const inside = authenticated;
   const formOpen = !$("auth-form").hidden;
   $("auth-in").hidden = !inside;
   $("auth-open").hidden = inside || formOpen;
@@ -566,6 +593,7 @@ function viewFailReason(person) {
 }
 
 function openReasonDialog(person, date) {
+  if (!authenticated) return;
   failChoice = { person, date };
   $("reason-person").textContent = `${person} · ${prettyDate(date)}`;
   $("reason-error").hidden = true;
@@ -607,7 +635,7 @@ $("reason-dialog").addEventListener("cancel", event => {
 });
 $("reason-form").addEventListener("submit", async event => {
   event.preventDefault();
-  if (!failChoice || markPending || !$("reason-select").value) return;
+  if (!authenticated || !failChoice || markPending || !$("reason-select").value) return;
   if (failChoice.date !== selected) {
     $("reason-dialog").close();
     failChoice = null;
@@ -628,7 +656,7 @@ $("reason-form").addEventListener("submit", async event => {
 });
 
 async function adjustVisits(person, delta) {
-  if (markPending || !loaded || (delta < 0 && visitsFor(selected, person) === 0)) return;
+  if (!authenticated || markPending || !loaded || (delta < 0 && visitsFor(selected, person) === 0)) return;
   const date = selected;
   setDayNote("");
   if (delta > 0) {
@@ -704,6 +732,7 @@ $("jump-today").addEventListener("click", () => {
 
 buildGrid();
 renderAuth();
+restoreAuth();
 run(() => api("GET", "/api/log"));
 
 // подтягиваем чужие отметки, пока страница открыта

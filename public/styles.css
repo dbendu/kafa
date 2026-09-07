@@ -125,10 +125,10 @@ body {
   border-radius: 8px; background: #fff; color: var(--muted);
   font: inherit; font-size: 13px; cursor: pointer;
 }
-.status-button:hover:not(:disabled) { background: var(--paper); border-color: var(--faint); }
-.status-button[aria-pressed="true"] { font-weight: 600; }
-.status-button.skips[aria-pressed="true"] { background: var(--miss-soft); border-color: var(--miss); color: var(--miss); }
-.status-button.fails[aria-pressed="true"] { background: var(--fail-soft); border-color: var(--fail); color: #6b5a13; }
+button.status-button:hover:not(:disabled) { background: var(--paper); border-color: var(--faint); }
+.status-button[data-active="true"] { font-weight: 600; }
+.status-button.skips[data-active="true"] { background: var(--miss-soft); border-color: var(--miss); color: var(--miss); }
+.status-button.fails[data-active="true"] { background: var(--fail-soft); border-color: var(--fail); color: #6b5a13; }
 .status-button:focus-visible { outline: 2px solid var(--l3); outline-offset: 2px; }
 .status-button:disabled { opacity: .55; cursor: wait; }
 @media (max-width: 480px) {
@@ -247,3 +247,13 @@ body {
   .visit-value { font-size: 14px; }
   .person-actions > .reason-info { min-height: 44px; }
 }
+
+.person-actions.read-only .visit-counter { display: block; }
+.person-actions.read-only .visit-value {
+  display: flex; min-height: 40px; align-items: center; justify-content: center;
+  border: 1px solid var(--line); border-radius: 8px;
+}
+.person-actions.read-only .status-button { display: flex; align-items: center; justify-content: center; cursor: default; }
+@media (max-width: 480px) { .person-actions.read-only .visit-value { min-height: 44px; } }
+
+.auth-prompt { margin: 0; white-space: nowrap; }
