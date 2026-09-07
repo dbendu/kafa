@@ -3,7 +3,7 @@
 const fs = require("node:fs");
 const { DatabaseSync } = require("node:sqlite");
 
-const TABLES = { days: "visits", skips: "skips", fails: "fails" };
+const TABLES = { skips: "skips", fails: "fails" };
 const sameName = (a, b) => a.toLocaleLowerCase("ru") === b.toLocaleLowerCase("ru");
 
 class Storage {
@@ -16,7 +16,7 @@ class Storage {
     try {
       this.db.exec("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
       for (const [table, columns] of Object.entries({
-        people: "id, name", visits: "id, date, person_id", skips: "id, date, person_id",
+        people: "id, name", visits: "id, date, person_id, count", skips: "id, date, person_id",
         reasons: "id, reason", fails: "id, date, person_id, reason_id",
       })) {
         this.db.prepare(`SELECT ${columns} FROM ${table} LIMIT 0`).all();
@@ -45,6 +45,11 @@ class Storage {
       state.reasons = this.db.prepare("SELECT id, reason FROM reasons ORDER BY id").all()
         .filter(row => row.reason.trim());
       state.people = this.db.prepare("SELECT name FROM people ORDER BY id").all().map(p => p.name);
+      for (const row of this.db.prepare(`SELECT v.date, p.name, SUM(v.count) AS count
+        FROM visits v JOIN people p ON p.id = v.person_id
+        GROUP BY v.date, p.id ORDER BY MIN(v.id)`).all()) {
+        (state.days[row.date] ||= []).push({ name: row.name, count: row.count });
+      }
       for (const [kind, table] of Object.entries(TABLES)) {
         for (const row of this.db.prepare(`SELECT e.date, p.name FROM ${table} e
           JOIN people p ON p.id = e.person_id ORDER BY e.id`).all()) {
@@ -59,6 +64,33 @@ class Storage {
       }
       return state;
     }, false);
+  }
+
+  adjustVisits(date, name, delta) {
+    if (typeof name !== "string" || !name || ![1, -1].includes(delta)) throw new Error("Некорректное изменение посещений");
+    this.transaction(() => {
+      const people = this.db.prepare("SELECT id, name FROM people ORDER BY id").all();
+      let matches = people.filter(person => sameName(person.name, name));
+      if (!matches.length) {
+        if (delta < 0) return;
+        this.db.prepare("INSERT INTO people(name) VALUES (?)").run(name);
+        matches = [this.db.prepare("SELECT id, name FROM people WHERE name = ?").get(name)];
+      }
+      const rows = matches.flatMap(person => this.db.prepare(
+        "SELECT id, count FROM visits WHERE date = ? AND person_id = ? ORDER BY id"
+      ).all(date, person.id));
+      const count = Math.max(0, rows.reduce((total, row) => total + row.count, 0) + delta);
+      if (!Number.isSafeInteger(count)) throw new Error("Слишком большое количество посещений");
+      if (!rows.length) {
+        if (count) this.db.prepare("INSERT INTO visits(date, person_id, count) VALUES (?, ?, ?)").run(date, matches[0].id, count);
+        return;
+      }
+      // Also consolidate any old manually duplicated rows for this person/day.
+      if (count) this.db.prepare("UPDATE visits SET count = ? WHERE id = ?").run(count, rows[0].id);
+      for (const row of count ? rows.slice(1) : rows) {
+        this.db.prepare("DELETE FROM visits WHERE id = ?").run(row.id);
+      }
+    });
   }
 
   change(kind, date, name, remove = false, reasonId) {
@@ -87,11 +119,6 @@ class Storage {
         return;
       }
 
-      // Attendance and skipping exclude each other; fails remain independent.
-      const opposite = kind === "days" ? "skips" : kind === "skips" ? "visits" : null;
-      for (const person of matches) {
-        if (opposite) this.db.prepare(`DELETE FROM ${opposite} WHERE date = ? AND person_id = ?`).run(date, person.id);
-      }
       const exists = matches.some(p => this.db.prepare(
         `SELECT id FROM ${table} WHERE date = ? AND person_id = ? LIMIT 1`
       ).get(date, p.id));

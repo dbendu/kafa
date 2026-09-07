@@ -62,10 +62,8 @@ function allowed(req) {
 
 // ---------- операции ----------
 
-const addAttendees = (date, name) => storage.change("days", date, name);
 const addSkips = (date, name) => storage.change("skips", date, name);
 const addFails = (date, name, reasonId) => storage.change("fails", date, name, false, reasonId);
-const removeAttendee = (date, name) => storage.change("days", date, name, true);
 const removeSkip = (date, name) => storage.change("skips", date, name, true);
 const removeFail = (date, name) => storage.change("fails", date, name, true);
 
@@ -158,12 +156,12 @@ async function readName(req) {
 // Любая изменяющая ручка отвечает новым состоянием целиком, чтобы клиенту
 // не приходилось делать отдельный GET после записи.
 
-// POST /api/days/:date/attendees — пришли
-async function postAttendees(req, res, date) {
+// POST /api/days/:date/visits/increment or decrement — one visit per request.
+async function postVisitChange(req, res, date, delta) {
   if (!validDate(date)) return sendJson(res, 400, { error: BAD_DATE });
   const { name, error } = await readName(req);
   if (error) return sendJson(res, 400, { error });
-  await addAttendees(date, name);
+  storage.adjustVisits(date, name, delta);
   return sendJson(res, 200, storage.read());
 }
 
@@ -173,14 +171,6 @@ async function postSkips(req, res, date) {
   const { name, error } = await readName(req);
   if (error) return sendJson(res, 400, { error });
   await addSkips(date, name);
-  return sendJson(res, 200, storage.read());
-}
-
-// DELETE /api/days/:date/attendees/:name
-async function deleteAttendee(res, date, name) {
-  if (!validDate(date)) return sendJson(res, 400, { error: BAD_DATE });
-  if (!name) return sendJson(res, 400, { error: "Не указано имя" });
-  await removeAttendee(date, name);
   return sendJson(res, 200, storage.read());
 }
 
@@ -230,8 +220,8 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, storage.read());
   }
 
-  if (req.method === "POST" && isDay(4) && seg[3] === "attendees") {
-    return postAttendees(req, res, decodeURIComponent(seg[2]));
+  if (req.method === "POST" && isDay(5) && seg[3] === "visits" && ["increment", "decrement"].includes(seg[4])) {
+    return postVisitChange(req, res, decodeURIComponent(seg[2]), seg[4] === "increment" ? 1 : -1);
   }
 
   if (req.method === "POST" && isDay(4) && seg[3] === "skips") {
@@ -240,10 +230,6 @@ async function handleApi(req, res, url) {
 
   if (req.method === "POST" && isDay(4) && seg[3] === "fails") {
     return postFails(req, res, decodeURIComponent(seg[2]));
-  }
-
-  if (req.method === "DELETE" && isDay(5) && seg[3] === "attendees") {
-    return deleteAttendee(res, decodeURIComponent(seg[2]), cleanName(decodeURIComponent(seg[4])));
   }
 
   if (req.method === "DELETE" && isDay(5) && seg[3] === "skips") {

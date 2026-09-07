@@ -13,6 +13,8 @@ const iso = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate(
 const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
 const dowMon = (d) => (d.getDay() + 6) % 7;
 const lower = (s) => s.toLocaleLowerCase("ru");
+const visitTotal = (rows) => rows.reduce((total, row) => total + row.count, 0);
+const visitsFor = (date, name) => (state.days[date] || []).reduce((total, row) => total + (lower(row.name) === lower(name) ? row.count : 0), 0);
 
 const today = new Date();
 today.setHours(0, 0, 0, 0);
@@ -226,14 +228,14 @@ function buildGrid() {
 // ---------- отрисовка ----------
 
 function paintGrid() {
-  const counts = Object.values(state.days).map((v) => v.length);
+  const counts = Object.values(state.days).map(visitTotal);
   const max = Math.max(1, ...counts);
   for (const [key, btn] of cells) {
-    const n = (state.days[key] || []).length;
+    const n = visitTotal(state.days[key] || []);
     const level = n === 0 ? 0 : Math.min(4, Math.ceil((n / max) * 4));
     btn.className = `cell l${level}${key === selected ? " sel" : ""}`;
     btn.title = `${key} — ${n}`;
-    btn.setAttribute("aria-label", `${key}, пришло ${n}`);
+    btn.setAttribute("aria-label", `${key}, посещений ${n}`);
   }
 }
 
@@ -249,7 +251,7 @@ function renderDay() {
   const botched = state.fails[selected] || [];
   $("day-title").textContent = prettyDate(selected);
   const parts = [];
-  if (list.length) parts.push(`Пришло: ${list.length}`);
+  if (list.length) parts.push(`Посещений: ${visitTotal(list)}`);
   if (missed.length) parts.push(`Кинули: ${missed.length}`);
   if (botched.length) parts.push(`Косяков: ${botched.length}`);
   $("day-count").textContent = parts.join(" · ") || "Пока никто не отмечен";
@@ -276,8 +278,32 @@ function renderDay() {
     actions.className = "person-actions";
     actions.setAttribute("role", "group");
     actions.setAttribute("aria-label", `Отметки: ${person}`);
+    const count = visitsFor(selected, person);
+    const counter = document.createElement("div");
+    counter.className = "visit-counter";
+    counter.setAttribute("role", "group");
+    counter.setAttribute("aria-label", `Посещения: ${person}`);
+    const value = document.createElement("input");
+    value.type = "text";
+    value.readOnly = true;
+    value.value = String(count);
+    value.setAttribute("aria-label", `${person}: количество посещений`);
+    for (const delta of [-1, 1]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "visit-step";
+      button.textContent = delta < 0 ? "−" : "+";
+      button.dataset.person = person;
+      button.dataset.kind = delta < 0 ? "decrement" : "increment";
+      button.setAttribute("aria-label", `${person}: ${delta < 0 ? "уменьшить" : "увеличить"} посещения`);
+      button.disabled = markPending || !loaded || (delta < 0 && count === 0);
+      button.addEventListener("click", () => adjustVisits(person, delta));
+      if (delta > 0) counter.append(value);
+      counter.append(button);
+    }
+    actions.append(counter);
     for (const [kind, title, bag] of [
-      ["attendees", "Пришёл", list], ["skips", "Кинул", missed], ["fails", "Накосячил", botched],
+      ["skips", "Кинул", missed], ["fails", "Накосячил", botched],
     ]) {
       const active = bag.some(name => lower(name) === lower(person));
       const button = document.createElement("button");
@@ -323,7 +349,7 @@ function renderDay() {
 // Рейтинг мешка: [[имя, сколько раз], …] без порядка — сортирует вызывающий.
 // Все известные имена попадают сюда, даже с нулём: иначе тот, кто ещё ни разу
 // не приходил (или ни разу не кидал), не показался бы в рейтинге вовсе.
-function tally(bag) {
+function tally(bag, visits = false) {
   const counts = new Map(); // ключ — имя в нижнем регистре
   const add = (person, n) => {
     const row = counts.get(lower(person));
@@ -334,7 +360,7 @@ function tally(bag) {
   // сначала список — от него берём написание имени, потом отметки
   for (const person of knownPeople()) add(person, 0);
   for (const list of Object.values(bag)) {
-    for (const person of list) add(person, 1);
+    for (const entry of list) add(visits ? entry.name : entry, visits ? entry.count : 1);
   }
 
   return [...counts.values()].map((row) => [row.person, row.n]);
@@ -370,7 +396,7 @@ function renderTops() {
 // состав, включая тех, кто ещё ни разу не пришёл. Но пока никто не пришёл
 // вовсе, карточку не показываем: столбик нулей ничего не говорит.
 function renderTopAttendees() {
-  const rows = withRanks(tally(state.days).sort(mostFirst));
+  const rows = withRanks(tally(state.days, true).sort(mostFirst));
   $("top-card").hidden = !rows.some(({ n }) => n > 0);
   renderBars($("top"), rows, {
     badges: Array.isArray(window.RANKS) ? window.RANKS : [],
@@ -444,7 +470,7 @@ function renderBars(box, rows, { badges, rankWord }) {
 function renderSummary() {
   const days = Object.keys(state.days).length;
   const total = (bag) => Object.values(bag).reduce((s, v) => s + v.length, 0);
-  const visits = total(state.days);
+  const visits = Object.values(state.days).reduce((sum, rows) => sum + visitTotal(rows), 0);
   const misses = total(state.skips);
   const fails = total(state.fails);
   if (!days && !misses && !fails) {
@@ -452,7 +478,7 @@ function renderSummary() {
     return;
   }
   $("summary").textContent =
-    `${visits} приходов за ${days} сборищ.` +
+    `${visits} посещений за ${days} дней.` +
     (misses ? ` Кидков: ${misses}.` : "") +
     (fails ? ` Косяков: ${fails}.` : "");
 }
@@ -598,23 +624,45 @@ $("reason-form").addEventListener("submit", async event => {
   }
 });
 
+async function adjustVisits(person, delta) {
+  if (markPending || !loaded || (delta < 0 && visitsFor(selected, person) === 0)) return;
+  const date = selected;
+  setDayNote("");
+  if (delta > 0) {
+    const required = requiredNames();
+    const attendees = [...(state.days[date] || []).filter(row => row.count > 0).map(row => row.name), person];
+    if (required.length && !required.some(name => attendees.some(p => lower(p) === lower(name)))) {
+      setDayNote(window.REQUIRED_NOTE || "Сначала отметьте одного из обязательных участников");
+      return;
+    }
+  }
+  const action = delta > 0 ? "increment" : "decrement";
+  markPending = true;
+  revision += 1;
+  renderDay();
+  try { await run(() => api("POST", `/api/days/${date}/visits/${action}`, { name: person })); }
+  finally {
+    markPending = false;
+    revision += 1;
+    renderDay();
+    if (selected === date && document.activeElement === document.body) {
+      const buttons = [...$("people").querySelectorAll("button")];
+      const button = buttons.find(b => b.dataset.person === person && b.dataset.kind === action && !b.disabled)
+        || buttons.find(b => b.dataset.person === person && b.dataset.kind === "increment");
+      button?.focus({ preventScroll: true });
+    }
+  }
+}
+
 async function toggleMark(person, kind, reasonId) {
   if (markPending || !loaded) return;
   const date = selected;
-  const bag = state[kind === "attendees" ? "days" : kind];
+  const bag = state[kind];
   const active = reasonId === undefined && (bag[date] || []).some(name => lower(name) === lower(person));
   setDayNote("");
   if (kind === "fails" && !active && reasonId === undefined) {
     openReasonDialog(person, date);
     return;
-  }
-  if (kind === "attendees" && !active) {
-    const required = requiredNames();
-    const after = [...(state.days[date] || []), person];
-    if (required.length && !required.some(r => after.some(p => lower(p) === lower(r)))) {
-      setDayNote(window.REQUIRED_NOTE || "Сначала отметьте одного из обязательных участников");
-      return;
-    }
   }
   markPending = true;
   revision += 1;
