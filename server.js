@@ -10,7 +10,6 @@ const DATA_FILE = process.env.DATA_FILE || path.join(__dirname, "data.sqlite");
 const PUBLIC_DIR = path.join(__dirname, "public");
 const MAX_BODY = 8 * 1024;
 const MAX_NAME = 40;
-const MAX_BATCH = 50; // сколько имён принимаем за один запрос
 
 // Логин и пароль берём из окружения (см. .env). Если не заданы — проверки нет
 // и правит кто угодно. Сравнение обычной строкой: это домашний счётчик кофе.
@@ -63,12 +62,12 @@ function allowed(req) {
 
 // ---------- операции ----------
 
-const addAttendees = (date, names) => storage.change("days", date, names);
-const addSkips = (date, names) => storage.change("skips", date, names);
-const addFails = (date, names) => storage.change("fails", date, names);
-const removeAttendee = (date, name) => storage.change("days", date, [name], true);
-const removeSkip = (date, name) => storage.change("skips", date, [name], true);
-const removeFail = (date, name) => storage.change("fails", date, [name], true);
+const addAttendees = (date, name) => storage.change("days", date, name);
+const addSkips = (date, name) => storage.change("skips", date, name);
+const addFails = (date, name, reasonId) => storage.change("fails", date, name, false, reasonId);
+const removeAttendee = (date, name) => storage.change("days", date, name, true);
+const removeSkip = (date, name) => storage.change("skips", date, name, true);
+const removeFail = (date, name) => storage.change("fails", date, name, true);
 
 // ---------- http ----------
 
@@ -138,33 +137,20 @@ async function serveStatic(res, urlPath) {
 
 const BAD_DATE = "Дата должна быть в формате ГГГГ-ММ-ДД";
 
-// Список имён из тела запроса: принимаем и одно имя, и группу —
-// {"name":"…"} либо {"names":["…","…"]}. Возвращает { names } либо { error }.
-async function readNames(req) {
+// Один запрос — один человек: {"name":"…"}.
+async function readName(req) {
   let body;
   try {
     body = await readBody(req);
   } catch {
     return { error: "Не удалось разобрать запрос" };
   }
-
-  const raw = Array.isArray(body.names) ? body.names : [body.name];
-  if (raw.length > MAX_BATCH) {
-    return { error: `За раз можно отметить не больше ${MAX_BATCH} человек` };
+  if (!body || typeof body !== "object" || Array.isArray(body) || "names" in body) {
+    return { error: "Укажите одного человека в поле name" };
   }
-
-  const names = [];
-  const seen = new Set();
-  for (const item of raw) {
-    const name = cleanName(item);
-    if (!name) return { error: `Имя должно быть непустым, до ${MAX_NAME} символов` };
-    const key = name.toLocaleLowerCase("ru");
-    if (seen.has(key)) continue; // дубль внутри списка
-    seen.add(key);
-    names.push(name);
-  }
-  if (!names.length) return { error: "Не указано ни одного имени" };
-  return { names };
+  const name = cleanName(body.name);
+  if (!name) return { error: `Имя должно быть непустым, до ${MAX_NAME} символов` };
+  return { name, reasonId: body.reason_id };
 }
 
 // ---------- ручки API ----------
@@ -175,18 +161,18 @@ async function readNames(req) {
 // POST /api/days/:date/attendees — пришли
 async function postAttendees(req, res, date) {
   if (!validDate(date)) return sendJson(res, 400, { error: BAD_DATE });
-  const { names, error } = await readNames(req);
+  const { name, error } = await readName(req);
   if (error) return sendJson(res, 400, { error });
-  await addAttendees(date, names);
+  await addAttendees(date, name);
   return sendJson(res, 200, storage.read());
 }
 
 // POST /api/days/:date/skips — обещали и кинули
 async function postSkips(req, res, date) {
   if (!validDate(date)) return sendJson(res, 400, { error: BAD_DATE });
-  const { names, error } = await readNames(req);
+  const { name, error } = await readName(req);
   if (error) return sendJson(res, 400, { error });
-  await addSkips(date, names);
+  await addSkips(date, name);
   return sendJson(res, 200, storage.read());
 }
 
@@ -209,9 +195,9 @@ async function deleteSkip(res, date, name) {
 // POST /api/days/:date/fails — накосячил
 async function postFails(req, res, date) {
   if (!validDate(date)) return sendJson(res, 400, { error: BAD_DATE });
-  const { names, error } = await readNames(req);
+  const { name, reasonId, error } = await readName(req);
   if (error) return sendJson(res, 400, { error });
-  await addFails(date, names);
+  await addFails(date, name, reasonId);
   return sendJson(res, 200, storage.read());
 }
 
@@ -282,8 +268,10 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, 405, { error: "Метод не поддерживается" });
     }
   } catch (err) {
-    console.error(err);
-    if (!res.headersSent) sendJson(res, 500, { error: "Сервер не смог обработать запрос" });
+    if (err.statusCode !== 400) console.error(err);
+    if (!res.headersSent) sendJson(res, err.statusCode === 400 ? 400 : 500, {
+      error: err.statusCode === 400 ? err.message : "Сервер не смог обработать запрос",
+    });
   }
 });
 

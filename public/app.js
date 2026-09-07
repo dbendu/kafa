@@ -20,8 +20,11 @@ today.setHours(0, 0, 0, 0);
 // days — кто пришёл, skips — кто обещал и кинул, fails — кто накосячил
 let state = { days: {}, people: [], skips: {}, fails: {} };
 let selected = iso(today);
-// отмеченные галочками, но ещё не сохранённые (ключ — имя в нижнем регистре)
-const picked = new Set();
+let markPending = false;
+let loaded = false;
+let revision = 0;
+let renderedDay = "";
+let failChoice = null;
 const cells = new Map(); // "ГГГГ-ММ-ДД" -> кнопка
 
 const $ = (id) => document.getElementById(id);
@@ -55,7 +58,7 @@ function pack(user, pass) {
   return `${encodeURIComponent(user)}:${encodeURIComponent(pass)}`;
 }
 
-// Имена для выпадающего списка: сначала ростер из public/names.js,
+// Имена для списка участников: сначала ростер из public/names.js,
 // затем те, кого отмечали раньше, но в ростере уже нет.
 function knownPeople() {
   const out = [];
@@ -108,8 +111,10 @@ async function api(method, url, body) {
 
   if (res.status === 401) {
     rememberAuth("");
+    $("reason-dialog").close();
+    failChoice = null;
     openAuth();
-    setPickNote("Нужен пароль, чтобы менять историю");
+    setDayNote("Нужен пароль, чтобы менять историю");
     const err = new Error("нет пропуска");
     err.handled = true; // сообщение уже показано рядом с кнопкой
     throw err;
@@ -120,10 +125,10 @@ async function api(method, url, body) {
   return data;
 }
 
-// Предупреждение внутри карточки дня, рядом с галочками. Элемент статичный,
+// Предупреждение внутри карточки дня, рядом с участниками. Элемент статичный,
 // renderDay его не перерисовывает, поэтому опрос сервера сообщение не сотрёт.
-function setPickNote(text) {
-  const el = $("pick-note");
+function setDayNote(text) {
+  const el = $("day-note");
   el.textContent = text;
   el.hidden = !text;
 }
@@ -142,17 +147,25 @@ function adopt(fresh) {
     people: fresh.people || [],
     skips: fresh.skips || {},
     fails: fresh.fails || {},
+    reasons: Array.isArray(fresh.reasons) ? fresh.reasons : [],
   };
 }
 
 async function run(fn) {
   try {
     state = adopt(await fn());
+    loaded = true;
     showNote("");
   } catch (err) {
     // handled — про ошибку уже сказано в карточке дня, верхний баннер не нужен
     if (err.handled) showNote("");
-    else showNote(err.message === "Failed to fetch" ? "Нет связи с сервером. Проверьте, что он запущен." : err.message);
+    else {
+      const message = err.message === "Failed to fetch" ? "Нет связи с сервером. Проверьте, что он запущен." : err.message;
+      if ($("reason-dialog").open) {
+        $("reason-error").textContent = message;
+        $("reason-error").hidden = false;
+      } else showNote(message);
+    }
   }
   render();
 }
@@ -196,8 +209,7 @@ function buildGrid() {
       } else {
         btn.addEventListener("click", () => {
           selected = key;
-          picked.clear();
-          setPickNote("");
+          setDayNote("");
           render();
         });
         cells.set(key, btn);
@@ -229,118 +241,70 @@ function prettyDate(s) {
   return `${d} ${M_GEN[m - 1]}, ${DOW[dowMon(new Date(y, m - 1, d))]}`;
 }
 
-// Одна отметка дня: имя, корона у «отцов» и крестик, чтобы снять.
-function makeChip(person, undoLabel, undo) {
-  const chip = document.createElement("span");
-  chip.className = "chip";
-  const mark = crown(person);
-  if (mark) chip.appendChild(mark);
-  chip.append(person);
-  const x = document.createElement("button");
-  x.textContent = "×";
-  x.setAttribute("aria-label", `${undoLabel} ${person}`);
-  x.addEventListener("click", undo);
-  chip.appendChild(x);
-  return chip;
-}
-
-// Кто пришёл: крестик убирает приход.
-function renderAttendees(list) {
-  const box = $("attendees");
-  box.textContent = "";
-  for (const person of list) {
-    box.appendChild(makeChip(person, "Убрать", () => removeAttendee(person)));
-  }
-}
-
-// Кто кинул: крестик снимает кидок.
-function renderSkippers(list) {
-  const box = $("skippers");
-  box.textContent = "";
-  for (const person of list) {
-    box.appendChild(makeChip(person, "Снять кидок с", () => removeSkip(person)));
-  }
-}
-
-// Кто накосячил: крестик снимает косяк.
-function renderFails(list) {
-  const box = $("fails");
-  box.textContent = "";
-  for (const person of list) {
-    box.appendChild(makeChip(person, "Снять косяк с", () => removeFail(person)));
-  }
-}
-
+// Все участники остаются в списке; активная кнопка снимает отметку.
 function renderDay() {
   const list = state.days[selected] || [];
   const missed = state.skips[selected] || [];
   const botched = state.fails[selected] || [];
   $("day-title").textContent = prettyDate(selected);
-
   const parts = [];
   if (list.length) parts.push(`Пришло: ${list.length}`);
   if (missed.length) parts.push(`Кинули: ${missed.length}`);
   if (botched.length) parts.push(`Косяков: ${botched.length}`);
   $("day-count").textContent = parts.join(" · ") || "Пока никто не отмечен";
 
-  renderAttendees(list);
-  renderSkippers(missed);
-  renderFails(botched);
-
-  // Галочки: человек пропадает из списка, только когда отмечать в этом дне
-  // больше нечего — есть и приход (или кидок), и косяк. Косяк с приходом
-  // не спорит: можно прийти и всё равно накосячить.
   const all = knownPeople();
-  const has = (bag, p) => bag.some((x) => lower(x) === lower(p));
-  const free = all.filter((p) => !((has(list, p) || has(missed, p)) && has(botched, p)));
-  // кого-то могли отметить в соседней вкладке — снимаем повисшие галочки
-  for (const key of [...picked]) {
-    if (!free.some((p) => lower(p) === key)) picked.delete(key);
+  const signature = JSON.stringify([selected, list, missed, botched, all, markPending, loaded]);
+  if (signature === renderedDay) return;
+  renderedDay = signature;
+  const people = $("people");
+  const focused = people.contains(document.activeElement) ? document.activeElement.dataset : null;
+  const focusName = focused?.person;
+  const focusKind = focused?.kind;
+  people.textContent = "";
+  people.setAttribute("aria-busy", String(markPending || !loaded));
+  for (const person of all) {
+    const row = document.createElement("div");
+    row.className = "person-row";
+    const label = document.createElement("span");
+    label.className = "person-name";
+    const mark = crown(person);
+    if (mark) label.append(mark);
+    label.append(person);
+    const actions = document.createElement("div");
+    actions.className = "person-actions";
+    actions.setAttribute("role", "group");
+    actions.setAttribute("aria-label", `Отметки: ${person}`);
+    for (const [kind, title, bag] of [
+      ["attendees", "Пришёл", list], ["skips", "Кинул", missed], ["fails", "Накосячил", botched],
+    ]) {
+      const active = bag.some(name => lower(name) === lower(person));
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `status-button ${kind}`;
+      button.textContent = (active ? "✓ " : "") + title;
+      button.dataset.person = person;
+      button.dataset.kind = kind;
+      button.setAttribute("aria-pressed", String(active));
+      button.setAttribute("aria-label", `${person}: ${title}`);
+      button.title = active ? "Снять отметку" : "Поставить отметку";
+      button.disabled = markPending || !loaded;
+      button.addEventListener("click", () => toggleMark(person, kind));
+      actions.append(button);
+    }
+    row.append(label, actions);
+    people.append(row);
   }
-
-  const picker = $("picker");
-  picker.textContent = "";
-  for (const p of free) {
-    const label = document.createElement("label");
-    label.className = "pick";
-    const box = document.createElement("input");
-    box.type = "checkbox";
-    box.checked = picked.has(lower(p));
-    box.addEventListener("change", () => {
-      if (box.checked) picked.add(lower(p));
-      else picked.delete(lower(p));
-      setPickNote("");
-      label.classList.toggle("on", box.checked);
-      syncButtons();
-    });
-    const text = document.createElement("span");
-    text.textContent = p;
-    label.classList.toggle("on", box.checked);
-    const mark = crown(p);
-    label.append(box, ...(mark ? [mark] : []), text);
-    picker.appendChild(label);
-  }
-  if (!free.length) {
+  if (!all.length) {
     const empty = document.createElement("p");
     empty.className = "sub";
-    empty.textContent = all.length ? "Все уже отмечены" : "Список пуст — заполните public/names.js";
-    picker.appendChild(empty);
+    empty.textContent = loaded ? "Список участников пуст" : "Загружаю участников…";
+    people.append(empty);
   }
-  syncButtons();
-}
-
-// Галочки общие для всех кнопок: выбрали людей и решили, что с ними случилось.
-function syncButtons() {
-  const n = picked.size;
-  const add = $("add");
-  add.disabled = n === 0;
-  add.textContent = n > 1 ? `Отметить (${n})` : "Отметить";
-  const miss = $("miss");
-  miss.disabled = n === 0;
-  miss.textContent = n > 1 ? `Кинули (${n})` : "Кинул";
-  const fail = $("fail");
-  fail.disabled = n === 0;
-  fail.textContent = n > 1 ? `Косяки (${n})` : "Косяк";
+  if (focusName && !markPending) {
+    const button = [...people.querySelectorAll("button")].find(b => b.dataset.person === focusName && b.dataset.kind === focusKind);
+    button?.focus({ preventScroll: true });
+  }
 }
 
 // Рейтинг мешка: [[имя, сколько раз], …] без порядка — сортирует вызывающий.
@@ -512,7 +476,7 @@ $("auth-open").addEventListener("click", openAuth);
 $("auth-cancel").addEventListener("click", closeAuth);
 $("auth-out").addEventListener("click", () => {
   rememberAuth("");
-  setPickNote("");
+  setDayNote("");
 });
 
 $("auth-form").addEventListener("submit", async (e) => {
@@ -530,19 +494,19 @@ $("auth-form").addEventListener("submit", async (e) => {
       headers: { "X-Auth": candidate },
     });
     if (res.status === 401) {
-      setPickNote("Логин или пароль не подошли");
+      setDayNote("Логин или пароль не подошли");
       $("auth-pass").select();
       return;
     }
     if (!res.ok) {
-      setPickNote(`Проверка не прошла: сервер ответил ${res.status}`);
+      setDayNote(`Проверка не прошла: сервер ответил ${res.status}`);
       return;
     }
     rememberAuth(candidate);
     closeAuth();
-    setPickNote("");
+    setDayNote("");
   } catch {
-    setPickNote("Нет связи с сервером");
+    setDayNote("Нет связи с сервером");
   } finally {
     btn.disabled = false;
   }
@@ -550,75 +514,115 @@ $("auth-form").addEventListener("submit", async (e) => {
 
 // ---------- действия ----------
 
-// Имена из галочек — в том виде, в каком их знает список.
-function pickedNames() {
-  return knownPeople().filter((p) => picked.has(lower(p)));
+function openReasonDialog(person, date) {
+  failChoice = { person, date };
+  $("reason-person").textContent = `${person} · ${prettyDate(date)}`;
+  $("reason-error").hidden = true;
+  const select = $("reason-select");
+  select.textContent = "";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "ризоны";
+  placeholder.disabled = true;
+  placeholder.selected = true;
+  select.append(placeholder);
+  const reasons = (state.reasons || []).filter(reason => reason.reason.trim());
+  for (const reason of reasons) {
+    const option = document.createElement("option");
+    option.value = String(reason.id);
+    option.textContent = reason.reason;
+    select.append(option);
+  }
+  select.disabled = !reasons.length;
+  $("reason-save").disabled = true;
+  if (select.disabled) {
+    $("reason-error").textContent = "В базе пока нет причин. Добавьте причину и обновите страницу.";
+    $("reason-error").hidden = false;
+  }
+  $("reason-dialog").showModal();
 }
 
-// Отправка группы. Галочки чистим только после успеха, иначе выбор пропадёт зря.
-function sendMarks(url, names) {
-  run(async () => {
-    const fresh = await api("POST", url, { names });
-    picked.clear();
-    setPickNote("");
-    return fresh;
-  });
-}
+$("reason-select").addEventListener("change", () => {
+  $("reason-save").disabled = !$("reason-select").value || markPending;
+  $("reason-error").hidden = true;
+});
+$("reason-cancel").addEventListener("click", () => {
+  $("reason-dialog").close();
+  failChoice = null;
+});
+$("reason-dialog").addEventListener("cancel", event => {
+  if (markPending) event.preventDefault();
+  else failChoice = null;
+});
+$("reason-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  if (!failChoice || markPending || !$("reason-select").value) return;
+  if (failChoice.date !== selected) {
+    $("reason-dialog").close();
+    failChoice = null;
+    return;
+  }
+  const person = failChoice.person;
+  const reasonId = Number($("reason-select").value);
+  $("reason-error").hidden = true;
+  $("reason-select").disabled = true;
+  $("reason-save").disabled = true;
+  $("reason-cancel").disabled = true;
+  try { await toggleMark(person, "fails", reasonId); }
+  finally {
+    $("reason-select").disabled = false;
+    $("reason-save").disabled = !$("reason-select").value;
+    $("reason-cancel").disabled = false;
+  }
+});
 
-// Приход. Правило «без отцов день не засчитывается» — только про него.
-// Проверяем день целиком, а не только галочки: если кто-то из обязательных
-// уже отмечен раньше, добавлять к нему остальных можно свободно.
-function markAttendance() {
-  const names = pickedNames();
-  if (!names.length) return;
-
-  const required = requiredNames();
-  if (required.length) {
-    const after = [...(state.days[selected] || []), ...names];
-    const ok = required.some((r) => after.some((p) => lower(p) === lower(r)));
-    if (!ok) {
-      setPickNote(window.REQUIRED_NOTE || "Нужен кто-то из обязательных участников");
-      return; // галочки не сбрасываем — можно добить нужным именем и нажать снова
+async function toggleMark(person, kind, reasonId) {
+  if (markPending || !loaded) return;
+  const date = selected;
+  const bag = state[kind === "attendees" ? "days" : kind];
+  const active = reasonId === undefined && (bag[date] || []).some(name => lower(name) === lower(person));
+  setDayNote("");
+  if (kind === "fails" && !active && reasonId === undefined) {
+    openReasonDialog(person, date);
+    return;
+  }
+  if (kind === "attendees" && !active) {
+    const required = requiredNames();
+    const after = [...(state.days[date] || []), person];
+    if (required.length && !required.some(r => after.some(p => lower(p) === lower(r)))) {
+      setDayNote(window.REQUIRED_NOTE || "Сначала отметьте одного из обязательных участников");
+      return;
     }
   }
-
-  sendMarks(`/api/days/${selected}/attendees`, names);
+  markPending = true;
+  revision += 1;
+  renderDay();
+  const url = `/api/days/${date}/${kind}`;
+  try {
+    await run(async () => {
+      const fresh = active
+        ? await api("DELETE", `${url}/${encodeURIComponent(person)}`)
+        : await api("POST", url, { name: person, ...(kind === "fails" ? { reason_id: reasonId } : {}) });
+      if (reasonId !== undefined) {
+        $("reason-dialog").close();
+        failChoice = null;
+      }
+      return fresh;
+    });
+  } finally {
+    markPending = false;
+    revision += 1;
+    renderDay();
+    if (selected === date && document.activeElement === document.body) {
+      const button = [...$("people").querySelectorAll("button")].find(b => b.dataset.person === person && b.dataset.kind === kind);
+      button?.focus({ preventScroll: true });
+    }
+  }
 }
 
-// Кидок. Днём кафы он не считается, поэтому проверки на отцов тут нет.
-function markSkip() {
-  const names = pickedNames();
-  if (!names.length) return;
-  sendMarks(`/api/days/${selected}/skips`, names);
-}
-
-// Косяк. Как и кидок, правилом «отцов» не ограничен: накосячить можно и в день
-// без кафы.
-function markFail() {
-  const names = pickedNames();
-  if (!names.length) return;
-  sendMarks(`/api/days/${selected}/fails`, names);
-}
-
-function removeAttendee(person) {
-  run(() => api("DELETE", `/api/days/${selected}/attendees/${encodeURIComponent(person)}`));
-}
-
-function removeSkip(person) {
-  run(() => api("DELETE", `/api/days/${selected}/skips/${encodeURIComponent(person)}`));
-}
-
-function removeFail(person) {
-  run(() => api("DELETE", `/api/days/${selected}/fails/${encodeURIComponent(person)}`));
-}
-
-$("add").addEventListener("click", markAttendance);
-$("miss").addEventListener("click", markSkip);
-$("fail").addEventListener("click", markFail);
 $("jump-today").addEventListener("click", () => {
   selected = iso(today);
-  picked.clear();
-  setPickNote("");
+  setDayNote("");
   $("scroll").scrollLeft = $("scroll").scrollWidth;
   render();
 });
@@ -631,7 +635,14 @@ run(() => api("GET", "/api/log"));
 
 // подтягиваем чужие отметки, пока страница открыта
 function refresh() {
-  api("GET", "/api/log").then((fresh) => { state = adopt(fresh); render(); }).catch(() => {});
+  if (markPending) return;
+  const version = revision;
+  api("GET", "/api/log").then((fresh) => {
+    if (markPending || version !== revision) return;
+    state = adopt(fresh);
+    loaded = true;
+    render();
+  }).catch(() => {});
 }
 
 setInterval(() => {

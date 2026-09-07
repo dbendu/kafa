@@ -41,7 +41,9 @@ class Storage {
 
   read() {
     return this.transaction(() => {
-      const state = { days: {}, people: [], skips: {}, fails: {} };
+      const state = { days: {}, people: [], skips: {}, fails: {}, reasons: [] };
+      state.reasons = this.db.prepare("SELECT id, reason FROM reasons ORDER BY id").all()
+        .filter(row => row.reason.trim());
       state.people = this.db.prepare("SELECT name FROM people ORDER BY id").all().map(p => p.name);
       for (const [kind, table] of Object.entries(TABLES)) {
         for (const row of this.db.prepare(`SELECT e.date, p.name FROM ${table} e
@@ -53,49 +55,48 @@ class Storage {
     }, false);
   }
 
-  change(kind, date, names, remove = false) {
+  change(kind, date, name, remove = false, reasonId) {
+    if (typeof name !== "string" || !name) throw new Error("Укажите одного человека");
     const table = TABLES[kind];
     if (!table) throw new Error("Неизвестный тип отметки");
     this.transaction(() => {
+      const reason = kind === "fails" && !remove && Number.isSafeInteger(reasonId)
+        ? this.db.prepare("SELECT reason FROM reasons WHERE id = ?").get(reasonId) : null;
+      if (kind === "fails" && !remove && !reason?.reason.trim()) {
+        const error = new Error("Выберите существующую причину косяка");
+        error.statusCode = 400;
+        throw error;
+      }
       const people = this.db.prepare("SELECT id, name FROM people ORDER BY id").all();
-      for (const name of names) {
-        let matches = people.filter(p => sameName(p.name, name));
-        if (!matches.length && !remove) {
-          this.db.prepare("INSERT INTO people(name) VALUES (?)").run(name);
-          const person = this.db.prepare("SELECT id, name FROM people WHERE name = ?").get(name);
-          people.push(person);
-          matches = [person];
-        }
-        if (remove) {
-          for (const person of matches) {
-            this.db.prepare(`DELETE FROM ${table} WHERE date = ? AND person_id = ?`).run(date, person.id);
-          }
-          continue;
-        }
-
-        // Attendance and skipping exclude each other; fails remain independent.
-        const opposite = kind === "days" ? "skips" : kind === "skips" ? "visits" : null;
+      let matches = people.filter(p => sameName(p.name, name));
+      if (!matches.length && !remove) {
+        this.db.prepare("INSERT INTO people(name) VALUES (?)").run(name);
+        const person = this.db.prepare("SELECT id, name FROM people WHERE name = ?").get(name);
+        matches = [person];
+      }
+      if (remove) {
         for (const person of matches) {
-          if (opposite) this.db.prepare(`DELETE FROM ${opposite} WHERE date = ? AND person_id = ?`).run(date, person.id);
+          this.db.prepare(`DELETE FROM ${table} WHERE date = ? AND person_id = ?`).run(date, person.id);
         }
-        const exists = matches.some(p => this.db.prepare(
-          `SELECT id FROM ${table} WHERE date = ? AND person_id = ? LIMIT 1`
-        ).get(date, p.id));
-        if (exists) continue;
+        return;
+      }
 
-        if (kind === "fails") {
-          // The user may have renamed reason 1: never overwrite or reuse it blindly.
-          let reason = this.db.prepare("SELECT id FROM reasons WHERE reason = '' ORDER BY id LIMIT 1").get();
-          if (!reason) {
-            const result = this.db.prepare("INSERT INTO reasons(reason) VALUES ('')").run();
-            reason = { id: result.lastInsertRowid };
-          }
-          this.db.prepare("INSERT INTO fails(date, person_id, reason_id) VALUES (?, ?, ?)")
-            .run(date, matches[0].id, reason.id);
-        } else {
-          this.db.prepare(`INSERT INTO ${table}(date, person_id) VALUES (?, ?)`)
-            .run(date, matches[0].id);
-        }
+      // Attendance and skipping exclude each other; fails remain independent.
+      const opposite = kind === "days" ? "skips" : kind === "skips" ? "visits" : null;
+      for (const person of matches) {
+        if (opposite) this.db.prepare(`DELETE FROM ${opposite} WHERE date = ? AND person_id = ?`).run(date, person.id);
+      }
+      const exists = matches.some(p => this.db.prepare(
+        `SELECT id FROM ${table} WHERE date = ? AND person_id = ? LIMIT 1`
+      ).get(date, p.id));
+      if (exists) return;
+
+      if (kind === "fails") {
+        this.db.prepare("INSERT INTO fails(date, person_id, reason_id) VALUES (?, ?, ?)")
+          .run(date, matches[0].id, reasonId);
+      } else {
+        this.db.prepare(`INSERT INTO ${table}(date, person_id) VALUES (?, ?)`)
+          .run(date, matches[0].id);
       }
     });
   }

@@ -40,16 +40,9 @@
   <section class="card">
     <h2 id="day-title">—</h2>
     <p id="day-count" class="sub"></p>
-    <div id="attendees" class="chips"></div>
-    <div id="skippers" class="chips miss"></div>
-    <div id="fails" class="chips fail"></div>
-    <div id="picker" class="picker" role="group" aria-label="Кого отметить"></div>
-    <div class="row">
-      <button id="add" class="primary">Отметить</button>
-      <button id="miss" class="ghost">Кинул</button>
-      <button id="fail" class="ghost fail">Косяк</button>
-    </div>
-    <p id="pick-note" class="pick-note" role="status" hidden></p>
+    <p class="sub day-help">Нажмите на статус напротив имени. Повторное нажатие снимет отметку.</p>
+    <div id="people" class="people-list" aria-label="Отметки участников"></div>
+    <p id="day-note" class="day-note" role="status" hidden></p>
 
     <div class="auth">
       <button id="auth-open" class="linky" hidden>Войти, чтобы отмечать</button>
@@ -79,6 +72,19 @@
   </section>
 
 </main>
+<dialog id="reason-dialog" aria-labelledby="reason-title">
+  <form id="reason-form">
+    <!-- <h2 id="reason-title">Ризон?</h2> -->
+    <p id="reason-person" class="sub"></p>
+    <label for="reason-select">Ризон косяка?</label>
+    <select id="reason-select" required></select>
+    <p id="reason-error" class="day-note" role="alert" hidden></p>
+    <div class="dialog-actions">
+      <button type="button" id="reason-cancel" class="linky">Отмена</button>
+      <button type="submit" id="reason-save" class="primary tiny">Сохранить</button>
+    </div>
+  </form>
+</dialog>
 <script src="/names.js"></script>
 <script src="/app.js"></script>
 </body>
