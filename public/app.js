@@ -148,6 +148,7 @@ function adopt(fresh) {
     skips: fresh.skips || {},
     fails: fresh.fails || {},
     reasons: Array.isArray(fresh.reasons) ? fresh.reasons : [],
+    failDetails: fresh.failDetails || {},
   };
 }
 
@@ -291,6 +292,18 @@ function renderDay() {
       button.disabled = markPending || !loaded;
       button.addEventListener("click", () => toggleMark(person, kind));
       actions.append(button);
+    }
+    if (botched.some(name => lower(name) === lower(person))) {
+      const info = document.createElement("button");
+      info.type = "button";
+      info.className = "reason-info";
+      info.textContent = "ⓘ";
+      info.dataset.person = person;
+      info.dataset.kind = "reason-info";
+      info.setAttribute("aria-label", `${person}: посмотреть причину косяка`);
+      info.title = "Посмотреть причину косяка";
+      info.addEventListener("click", () => viewFailReason(person));
+      actions.append(info);
     }
     row.append(label, actions);
     people.append(row);
@@ -513,6 +526,15 @@ $("auth-form").addEventListener("submit", async (e) => {
 });
 
 // ---------- действия ----------
+
+function viewFailReason(person) {
+  $("fail-view-person").textContent = `${person} · ${prettyDate(selected)}`;
+  const details = (state.failDetails?.[selected] || []).filter(row => lower(row.name) === lower(person));
+  $("fail-view-reasons").textContent = details.length
+    ? details.map(detail => detail.reason?.trim() ? detail.reason : "Причина не указана в записи косяка.").join("\n")
+    : "Не удалось получить причину. Обновите страницу.";
+  $("fail-view-dialog").showModal();
+}
 
 function openReasonDialog(person, date) {
   failChoice = { person, date };

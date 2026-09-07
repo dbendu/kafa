@@ -41,7 +41,7 @@ class Storage {
 
   read() {
     return this.transaction(() => {
-      const state = { days: {}, people: [], skips: {}, fails: {}, reasons: [] };
+      const state = { days: {}, people: [], skips: {}, fails: {}, reasons: [], failDetails: {} };
       state.reasons = this.db.prepare("SELECT id, reason FROM reasons ORDER BY id").all()
         .filter(row => row.reason.trim());
       state.people = this.db.prepare("SELECT name FROM people ORDER BY id").all().map(p => p.name);
@@ -50,6 +50,12 @@ class Storage {
           JOIN people p ON p.id = e.person_id ORDER BY e.id`).all()) {
           (state[kind][row.date] ||= []).push(row.name);
         }
+      }
+      for (const row of this.db.prepare(`SELECT f.id, f.date, p.name, f.reason_id, r.reason
+        FROM fails f JOIN people p ON p.id = f.person_id
+        LEFT JOIN reasons r ON r.id = f.reason_id ORDER BY f.id`).all()) {
+        const { date, ...detail } = row;
+        (state.failDetails[date] ||= []).push(detail);
       }
       return state;
     }, false);
