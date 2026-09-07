@@ -283,11 +283,14 @@ function renderDay() {
     counter.className = "visit-counter";
     counter.setAttribute("role", "group");
     counter.setAttribute("aria-label", `Посещения: ${person}`);
-    const value = document.createElement("input");
-    value.type = "text";
-    value.readOnly = true;
-    value.value = String(count);
-    value.setAttribute("aria-label", `${person}: количество посещений`);
+    const value = document.createElement("button");
+    value.type = "button";
+    value.className = "visit-value";
+    value.textContent = `Пришёл · ${count}`;
+    value.setAttribute("aria-label", `${person}: приходов за день — ${count}`);
+    value.setAttribute("aria-disabled", "true");
+    value.tabIndex = -1;
+    counter.classList.toggle("has-visits", count > 0);
     for (const delta of [-1, 1]) {
       const button = document.createElement("button");
       button.type = "button";
@@ -309,7 +312,7 @@ function renderDay() {
       const button = document.createElement("button");
       button.type = "button";
       button.className = `status-button ${kind}`;
-      button.textContent = (active ? "✓ " : "") + title;
+      button.textContent = (active && kind !== "fails" ? "✓ " : "") + title;
       button.dataset.person = person;
       button.dataset.kind = kind;
       button.setAttribute("aria-pressed", String(active));
