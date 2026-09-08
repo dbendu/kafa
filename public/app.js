@@ -26,6 +26,7 @@ let markPending = false;
 let loaded = false;
 let revision = 0;
 let renderedDay = "";
+let personNote = null;
 let failChoice = null;
 const cells = new Map(); // "ГГГГ-ММ-ДД" -> кнопка
 
@@ -145,12 +146,15 @@ async function api(method, url, body) {
   return data;
 }
 
-// Предупреждение внутри карточки дня, рядом с участниками. Элемент статичный,
-// renderDay его не перерисовывает, поэтому опрос сервера сообщение не сотрёт.
-function setDayNote(text) {
+// Предупреждение участника сохраняется при опросе и снимается при следующем действии.
+function setDayNote(text, person = null) {
+  const previous = personNote;
+  personNote = person && text ? { person, date: selected, text } : null;
   const el = $("day-note");
-  el.textContent = text;
-  el.hidden = !text;
+  el.textContent = person ? "" : text;
+  el.hidden = person || !text;
+  if (previous || personNote) renderDay();
+  if (personNote) $("person-note")?.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
 
 function showNote(text) {
@@ -275,7 +279,7 @@ function renderDay() {
   $("day-count").textContent = parts.join(" · ") || "Пока никто не отмечен";
 
   const all = knownPeople();
-  const signature = JSON.stringify([selected, list, missed, botched, all, markPending, loaded, authenticated]);
+  const signature = JSON.stringify([selected, list, missed, botched, all, markPending, loaded, authenticated, personNote]);
   if (signature === renderedDay) return;
   renderedDay = signature;
   const people = $("people");
@@ -362,6 +366,17 @@ function renderDay() {
       actions.append(info);
     }
     row.append(label, actions);
+    if (personNote && personNote.date === selected && lower(personNote.person) === lower(person)) {
+      row.classList.add("has-note");
+      const note = document.createElement("p");
+      note.id = "person-note";
+      note.className = "day-note person-note";
+      note.setAttribute("role", "alert");
+      note.textContent = personNote.text;
+      row.append(note);
+      const increment = [...actions.querySelectorAll("button")].find(button => button.dataset.kind === "increment");
+      increment?.setAttribute("aria-describedby", note.id);
+    }
     people.append(row);
   }
   if (!all.length) {
@@ -663,7 +678,7 @@ async function adjustVisits(person, delta) {
     const required = requiredNames();
     const attendees = [...(state.days[date] || []).filter(row => row.count > 0).map(row => row.name), person];
     if (required.length && !required.some(name => attendees.some(p => lower(p) === lower(name)))) {
-      setDayNote(window.REQUIRED_NOTE || "Сначала отметьте одного из обязательных участников");
+      setDayNote(window.REQUIRED_NOTE || "Сначала отметьте одного из обязательных участников", person);
       return;
     }
   }

@@ -257,3 +257,6 @@ button.status-button:hover:not(:disabled) { background: var(--paper); border-col
 @media (max-width: 480px) { .person-actions.read-only .visit-value { min-height: 44px; } }
 
 .auth-prompt { margin: 0; white-space: nowrap; }
+
+.person-row.has-note { flex-wrap: wrap; }
+.person-note { flex-basis: 100%; width: 100%; margin: 0; }
