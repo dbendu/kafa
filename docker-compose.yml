@@ -24,27 +24,17 @@ services:
       - ./public/ranks:/app/public/ranks:ro
       - ./public/antiranks:/app/public/antiranks:ro
       - ./public/fails:/app/public/fails:ro
+    networks:
+      - web
 
-  caddy:
-    image: caddy:2-alpine
-    container_name: coffee-caddy
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp" # HTTP/3
-    environment:
-      DOMAIN: ${DOMAIN:?задайте DOMAIN в файле .env}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      # Здесь лежат сертификаты. Без этого тома каждый пересозданный контейнер
-      # заново просит сертификат и упирается в лимиты Let's Encrypt.
-      - caddy-data:/data
-      - caddy-config:/config
-    depends_on:
-      - coffee
+# Caddy живёт отдельно — в репозитории edge, общий для всех приложений сервера.
+# Сюда приложение попадает по имени контейнера coffee-calendar.
+#
+# Сеть создаётся один раз на сервере:
+#     docker network create web
+networks:
+  web:
+    external: true
 
 volumes:
   coffee-data:
-  caddy-data:
-  caddy-config:
