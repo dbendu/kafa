@@ -445,3 +445,19 @@ API возвращает `{ days, people, skips, fails, reasons, failDetails }`.
 - Сетка показывает последний 371 день и всегда заканчивается сегодняшним днём.
 - Имена сравниваются без учёта регистра, пробелы схлопываются: `" аня "` и
   `"АНЯ"` — один человек.
+
+
+## Команды
+
+### Добавить ризон косяка
+
+На серваке:
+```
+docker compose exec -T coffee node - <<'EOF'
+const { DatabaseSync } = require('node:sqlite');
+const db = new DatabaseSync('/data/data.sqlite');
+db.exec('PRAGMA busy_timeout = 5000');
+db.prepare('INSERT INTO reasons(reason) VALUES (?)').run('Забыл кружку');
+console.log(db.prepare('SELECT id, reason FROM reasons ORDER BY id').all());
+EOF
+```
